@@ -1,0 +1,16 @@
+diff --git a/NRSC5_HDRadio_frontend.js b/NRSC5_HDRadio_frontend.js
+--- a/NRSC5_HDRadio_frontend.js
++++ b/NRSC5_HDRadio_frontend.js
+@@ -1086,4 +1086,5 @@
+             synchronized = false;
+             hdAudioReady = false;
+-            disconnectAudio();
++            _preBuf = [];
++            _preBufDur = 0;
+             unmuteFM();
+@@ -1132,2 +1133,4 @@
+-        disconnectAudio();
++        hdAudioReady = false;
++        _preBuf = [];
++        _preBufDur = 0;
+         unmuteFM();

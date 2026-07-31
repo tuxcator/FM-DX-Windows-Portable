@@ -1,0 +1,81 @@
+diff --git a/server/index.js b/server/index.js
+--- a/server/index.js
++++ b/server/index.js
+@@ -31,0 +32,1 @@
++const { createRtlVirtualOutput } = require('./rtl_virtual_output');
+@@ -113,2 +114,13 @@
+-connectToXdrd();
+-connectToSerial();
++const rtlVirtualMode = serverConfig.device === 'sdr' && serverConfig.portableRtlMode === true;
++let rtlVirtualOutput = null;
++if (rtlVirtualMode) {
++  rtlVirtualOutput = createRtlVirtualOutput({ dataHandler, wss, logInfo });
++  const initialFrequency = Number(serverConfig.defaultFreq || 87.5).toFixed(3);
++  dataHandler.initialData.freq = initialFrequency;
++  dataHandler.dataToSend.freq = initialFrequency;
++  pluginsApi.setOutput(rtlVirtualOutput);
++  logInfo(`Portable hardware mode: RTL-SDR / NRSC-5 (${initialFrequency} MHz)`);
++} else {
++  connectToXdrd();
++  connectToSerial();
++}
+@@ -372,1 +384,1 @@
+-    const output = serverConfig.xdrd.wirelessConnection ? client : serialport;
++    const output = rtlVirtualMode ? rtlVirtualOutput : (serverConfig.xdrd.wirelessConnection ? client : serialport);
+@@ -427,0 +440,1 @@
++    if (rtlVirtualMode) rtlVirtualOutput.sync();
+@@ -429,1 +442,1 @@
+-    if (currentUsers === 1 && serverConfig.autoShutdown === true && serverConfig.xdrd.wirelessConnection) {
++    if (!rtlVirtualMode && currentUsers === 1 && serverConfig.autoShutdown === true && serverConfig.xdrd.wirelessConnection) {
+@@ -484,1 +497,2 @@
+-        if ((serverConfig.publicTuner && !serverConfig.lockToAdmin) || isAdminAuthenticated || (!serverConfig.publicTuner && !serverConfig.lockToAdmin && isTuneAuthenticated)) {
++        const allowPortableLocalTuning = rtlVirtualMode && (normalizedClientIp === '127.0.0.1' || normalizedClientIp === '::1');
++        if (allowPortableLocalTuning || (serverConfig.publicTuner && !serverConfig.lockToAdmin) || isAdminAuthenticated || (!serverConfig.publicTuner && !serverConfig.lockToAdmin && isTuneAuthenticated)) {
+diff --git a/server/stream/3las.server.js b/server/stream/3las.server.js
+--- a/server/stream/3las.server.js
++++ b/server/stream/3las.server.js
+@@ -151,0 +152,11 @@
++    SetInput(input) {
++        if (this.StdIn && this._inputHandler) {
++            this.StdIn.removeListener('data', this._inputHandler);
++        }
++        this.StdIn = input;
++        this._inputHandler = null;
++        if (!input) return;
++        this._inputHandler = this.OnStdInData.bind(this);
++        input.on('data', this._inputHandler);
++        input.resume();
++    }
+@@ -169,2 +180,1 @@
+-        this.StdIn.on('data', this.OnStdInData.bind(this));
+-        this.StdIn.resume();
++        this.SetInput(this.StdIn);
+diff --git a/server/endpoints.js b/server/endpoints.js
+--- a/server/endpoints.js
++++ b/server/endpoints.js
+@@ -69,1 +69,1 @@
+-                publicTuner: serverConfig.publicTuner,
++                publicTuner: serverConfig.publicTuner || (serverConfig.device === 'sdr' && serverConfig.portableRtlMode === true && (req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1')),
+diff --git a/server/stream/index.js b/server/stream/index.js
+--- a/server/stream/index.js
++++ b/server/stream/index.js
+@@ -49,0 +50,12 @@
++        if (serverConfig.device === 'sdr' && serverConfig.portableRtlMode === true) {
++            return {
++                command: ffmpegPath,
++                args: [
++                    '-re', '-f', 'lavfi',
++                    '-i', 'anullsrc=r=48000:cl=stereo',
++                    ...baseOptions.codec,
++                    ...baseOptions.output
++                ]
++            };
++        }
++
+@@ -136,1 +148,5 @@
+-        logInfo(`${consoleLogTitle} Starting audio stream on device: \x1b[35m${serverConfig.audio.audioDevice}\x1b[0m`);
++        if (serverConfig.device === 'sdr' && serverConfig.portableRtlMode === true) {
++            logInfo(`${consoleLogTitle} RTL-SDR mode: base player uses internal silence; HD audio uses /hd_audio.`);
++        } else {
++            logInfo(`${consoleLogTitle} Starting audio stream on device: \x1b[35m${serverConfig.audio.audioDevice}\x1b[0m`);
++        }

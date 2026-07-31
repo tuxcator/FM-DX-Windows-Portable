@@ -1,0 +1,21 @@
+[submodule "third_party/fm-dx-webserver"]
+	path = third_party/fm-dx-webserver
+	url = https://github.com/NoobishSVK/fm-dx-webserver.git
+[submodule "third_party/NRSC5_HDRadio"]
+	path = third_party/NRSC5_HDRadio
+	url = https://github.com/Seehed/NRSC5_HDRadio.git
+[submodule "third_party/nrsc5"]
+	path = third_party/nrsc5
+	url = https://github.com/theori-io/nrsc5.git
+[submodule "third_party/nrsc5-gui"]
+	path = third_party/nrsc5-gui
+	url = https://github.com/cmnybo/nrsc5-gui.git
+[submodule "third_party/airspyhf"]
+	path = third_party/airspyhf
+	url = https://github.com/airspy/airspyhf.git
+[submodule "third_party/redsea"]
+	path = third_party/redsea
+	url = https://github.com/windytan/redsea.git
+[submodule "third_party/liquid-dsp"]
+	path = third_party/liquid-dsp
+	url = https://github.com/jgaeddert/liquid-dsp.git

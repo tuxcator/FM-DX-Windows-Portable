@@ -1,0 +1,37 @@
+diff --git a/NRSC5_HDRadio_frontend_server.js b/NRSC5_HDRadio_frontend_server.js
+--- a/NRSC5_HDRadio_frontend_server.js
++++ b/NRSC5_HDRadio_frontend_server.js
+@@ -151,1 +151,3 @@
+ let retuneTimer   = null;
++let lostSyncTimer = null;
++const HD_SYNC_HOLD_MS = 8000;
+@@ -360,5 +362,7 @@
+         case 'sync':
++            clearTimeout(lostSyncTimer);
++            lostSyncTimer = null;
+             if (!synchronized) {
+                 synchronized = true;
+                 hdLogInfo(`HD signal locked on ${currentFreq} MHz HD${currentProgram + 1}`);
+                 broadcastMeta();
+@@ -368,7 +372,13 @@
+         case 'lost_sync':
+-            if (synchronized) {
+-                synchronized = false;
+-                hdLogWarn(`Signal lost`);
+-                broadcastMeta();
++            if (synchronized && !lostSyncTimer) {
++                hdLogWarn(`Brief HD sync loss; holding state for ${HD_SYNC_HOLD_MS / 1000}s`);
++                lostSyncTimer = setTimeout(() => {
++                    lostSyncTimer = null;
++                    if (synchronized) {
++                        synchronized = false;
++                        hdLogWarn(`HD signal loss sustained; using FM analog`);
++                        broadcastMeta();
++                    }
++                }, HD_SYNC_HOLD_MS);
+             }
+             break;
+@@ -515,1 +525,3 @@
+ function resetMetadata() {
++    clearTimeout(lostSyncTimer);
++    lostSyncTimer = null;

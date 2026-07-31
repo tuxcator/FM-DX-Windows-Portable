@@ -1,0 +1,65 @@
+name: Reporte de problema
+description: Informe un fallo reproducible de FM-DX Windows Portable
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: No incluya contraseñas, tokens ni datos privados.
+  - type: dropdown
+    id: receiver
+    attributes:
+      label: Receptor
+      options:
+        - Airspy HF+ Discovery
+        - RTL-SDR RTL2832U
+        - TEF668x/XDR
+        - Otro
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: 0.3.0
+    validations:
+      required: true
+  - type: input
+    id: frequency
+    attributes:
+      label: Frecuencia
+      placeholder: 103.7 MHz
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Modo afectado
+      options:
+        - FM analogica
+        - Stereo/RDS
+        - HD Radio
+        - Red/WebSocket
+        - Construccion
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Descripcion y pasos
+      description: Explique qué hizo, qué ocurrió y qué esperaba.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Salida de Diagnostico
+      description: Pegue solamente datos técnicos sin secretos.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Comprobaciones
+      options:
+        - label: Cerre SDR# y otros programas SDR.
+          required: true
+        - label: Confirme que no incluí contraseñas ni tokens.
+          required: true

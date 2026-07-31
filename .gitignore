@@ -1,0 +1,37 @@
+# Build and runtime output
+dist/
+build/
+logs/
+data/
+backups/
+*.log
+*.zip
+*.sha256
+
+# Portable runtimes downloaded by bootstrap
+.cache/
+runtime/
+
+# Generated dependencies
+node_modules/
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+
+# Local secrets and certificates
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+secrets.*
+
+# Windows and editors
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+*.user

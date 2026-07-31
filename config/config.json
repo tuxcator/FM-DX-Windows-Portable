@@ -1,0 +1,126 @@
+{
+    "webserver":  {
+                      "webserverIp":  "0.0.0.0",
+                      "webserverPort":  8080,
+                      "banlist":  [
+
+                                  ],
+                      "chatEnabled":  false,
+                      "tuningLimit":  false,
+                      "tuningLowerLimit":  "87.5",
+                      "tuningUpperLimit":  "108",
+                      "presets":  [
+                                      "103.7",
+                                      "90.1",
+                                      "97.7",
+                                      "103.9"
+                                  ],
+                      "defaultTheme":  "theme1",
+                      "bgImage":  "",
+                      "rdsMode":  false,
+                      "rdsTimeout":  0,
+                      "txIdAlgorithm":  0
+                  },
+    "xdrd":  {
+                 "wirelessConnection":  true,
+                 "comPort":  "",
+                 "xdrdIp":  "127.0.0.1",
+                 "xdrdPort":  7373,
+                 "xdrdPassword":  ""
+             },
+    "audio":  {
+                  "audioDevice":  null,
+                  "audioChannels":  2,
+                  "audioBitrate":  "128k",
+                  "audioBoost":  false,
+                  "softwareMode":  false,
+                  "startupVolume":  "0.95",
+                  "ffmpeg":  true,
+                  "samplerateOffset":  "0"
+              },
+    "identification":  {
+                           "token":  null,
+                           "tunerName":  "FM-DX Windows Portable",
+                           "tunerDesc":  "Receptor local",
+                           "lat":  "",
+                           "lon":  "",
+                           "broadcastTuner":  false,
+                           "gpsMode":  false,
+                           "proxyIp":  "",
+                           "contact":  null
+                       },
+    "password":  {
+                     "tunePass":  "",
+                     "adminPass":  ""
+                 },
+    "antennas":  {
+                     "enabled":  false,
+                     "ant1":  {
+                                  "enabled":  true,
+                                  "name":  "Antena A"
+                              },
+                     "ant2":  {
+                                  "enabled":  false,
+                                  "name":  "Antena B"
+                              },
+                     "ant3":  {
+                                  "enabled":  false,
+                                  "name":  "Antena C"
+                              },
+                     "ant4":  {
+                                  "enabled":  false,
+                                  "name":  "Antena D"
+                              }
+                 },
+    "extras":  {
+                   "fmlistIntegration":  false,
+                   "fmlistAdminOnly":  true,
+                   "fmlistOmid":  ""
+               },
+    "si47xx":  {
+                   "agcControl":  false
+               },
+    "tunnel":  {
+                   "enabled":  false,
+                   "username":  "",
+                   "token":  "",
+                   "region":  "eu",
+                   "lowLatencyMode":  false,
+                   "subdomain":  "",
+                   "httpName":  "",
+                   "httpPassword":  "",
+                   "community":  {
+                                     "enabled":  false,
+                                     "host":  ""
+                                 }
+               },
+    "plugins":  [
+                    "NRSC5_HDRadio/NRSC5_HDRadio_frontend.js"
+                ],
+    "device":  "sdr",
+    "portableRtlMode":  true,
+    "portableHardware":  {
+                             "mode":  "airspyhf",
+                             "detected":  "unknown",
+                             "rtlAccessible":  false,
+                             "airspyPresent":  false,
+                             "airspyAccessible":  false
+                         },
+    "defaultFreq":  "103.7",
+    "publicTuner":  false,
+    "lockToAdmin":  false,
+    "autoShutdown":  false,
+    "enableDefaultFreq":  true,
+    "bwSwitch":  false,
+    "bwAutoStartup":  "0",
+    "bwAutoNoUsers":  "0",
+    "ceqStartup":  "0",
+    "ceqNoUsers":  "0",
+    "imsStartup":  "0",
+    "imsNoUsers":  "0",
+    "stereoStartup":  "0",
+    "stereoNoUsers":  "0",
+    "antennaStartup":  "0",
+    "antennaNoUsers":  "0",
+    "antennaNoUsersDelay":  false
+}

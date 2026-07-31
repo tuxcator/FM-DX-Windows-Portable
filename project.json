@@ -1,0 +1,29 @@
+{
+    "name":  "FM-DX-Windows-Portable",
+    "version":  "0.3.0",
+    "description":  "DistribuciÃ³n portÃ¡til para Windows de FM-DX Webserver con Airspy HF+, RTL-SDR y NRSC-5 HD Radio",
+    "target":  "win32-x64",
+    "runtimes":  {
+                     "node":  {
+                                  "version":  "24.18.0",
+                                  "url":  "https://nodejs.org/dist/v24.18.0/node-v24.18.0-win-x64.zip"
+                              },
+                     "python":  {
+                                    "version":  "3.13.14",
+                                    "url":  "https://www.python.org/ftp/python/3.13.14/python-3.13.14-embed-amd64.zip"
+                                },
+                     "msys2":  {
+                                   "version":  "20260611",
+                                   "url":  "https://repo.msys2.org/distrib/x86_64/msys2-base-x86_64-20260611.sfx.exe"
+                               }
+                 },
+    "upstream":  {
+                     "airspyhf":  "24fe8ffcb00b14f827268bbad89ae1392de055e5",
+                     "fm-dx-webserver":  "447a4d618647ff4ddccdea241dffd301d3e384d4",
+                     "NRSC5_HDRadio":  "085d4437b8365f403e57a66d4e65dd04071138bd",
+                     "nrsc5":  "5fe1c3b6d15cc4924e3e1ac8e1b622be33510735",
+                     "nrsc5-gui":  "1113d5a16f3dba834c6ff378d35880433fbd752f",
+                     "redsea":  "7555c9f6259d50718697ee8c9f218ea012c6892c",
+                     "liquid-dsp":  "8bf87b6fe325d98c250d6911fa50518d14175d86"
+                 }
+}

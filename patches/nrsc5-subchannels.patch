@@ -1,0 +1,178 @@
+diff --git a/NRSC5_HDRadio_frontend.js b/NRSC5_HDRadio_frontend.js
+index de63271..390c3bc 100644
+--- a/NRSC5_HDRadio_frontend.js
++++ b/NRSC5_HDRadio_frontend.js
+@@ -802,6 +802,7 @@ let bgAudioEl   = null;
+ let nextTime    = 0;
+ let _preBuf     = [];   // chunks buffered before first play
+ let _preBufDur  = 0;    // seconds accumulated in _preBuf
++const _scheduledSources = new Set();
+ const SAMPLE_RATE = 44100;
+ const CHANNELS    = 2;
+
+@@ -865,6 +866,8 @@ function _scheduleBuffer(buf) {
+     const src = audioCtx.createBufferSource();
+     src.buffer = buf;
+     src.connect(gainNode);
++    _scheduledSources.add(src);
++    src.onended = () => _scheduledSources.delete(src);
+     src.start(nextTime);
+     nextTime += buf.duration;
+ }
+@@ -983,6 +986,16 @@ function connectAudio() {
+     audioWs.onerror    = e => logE('HD audio WebSocket error:', e);
+ }
+
++function resetProgramAudio() {
++    _scheduledSources.forEach(src => { try { src.stop(); } catch (_) {} });
++    _scheduledSources.clear();
++    _preBuf = [];
++    _preBufDur = 0;
++    hdAudioReady = false;
++    nextTime = audioCtx ? audioCtx.currentTime + 0.05 : 0;
++    unmuteFM();
++    logAu(`Audio queue cleared for HD${currentProg + 1}; RF and WebSockets remain connected`);
++}
+ function disconnectAudio() {
+     logAu('Disconnecting HD audio (chunks total:', chunksTotal, ')');
+     if (audioWs) { audioWs.close(); audioWs = null; }
+@@ -1043,11 +1056,15 @@ function applyMeta(v) {
+
+     const prevSync = synchronized;
+     const prevFreq = meta.freq;
++    const prevProg = currentProg;
+     const prevSig = hdSignalDetected;
+     hdEnabled        = v.enabled;
+     hdSignalDetected = v.signalDetected ?? hdSignalDetected;
+     synchronized     = v.synchronized;
+-    if (v.program !== undefined) currentProg = v.program;
++    if (v.program !== undefined) {
++        currentProg = v.program;
++        if (currentProg !== prevProg) resetProgramAudio();
++    }
+
+     if (hdSignalDetected && !prevSig) {
+         log('HD Radio carrier detected — showing acquiring state');
+@@ -1178,11 +1195,11 @@ function disableHD() {
+     refreshIcon(); refreshDash(); refreshInlineHD();
+ }
+ function setProgram(p) {
+-    log(`Switching program → HD${p + 1}`);
++    p = Math.max(0, Math.min(7, Number(p) || 0));
++    if (p === currentProg) return;
++    log(`Switching program â†’ HD${p + 1} (receiver stays tuned)`);
+     currentProg = p;
+-    hdWasSynced = false;
+-    hdSignalDetected = false;
+-    _startNoSigTimer();
++    resetProgramAudio();
+     send('hd-radio-program', { program: p });
+     refreshDash(); refreshInlineHD();
+ }
+@@ -2257,9 +2274,12 @@ function refreshDash() {
+     dash.querySelectorAll('.hd-prog-btn').forEach(b => {
+         const p = parseInt(b.dataset.p);
+         const unlocked = synchronized || forceHdAudio;
++        const knownPrograms = Array.isArray(meta.availablePrograms) ? meta.availablePrograms : [];
++        const known = knownPrograms.includes(p) || p < _numProgs;
+         b.classList.toggle('active', p === currentProg && unlocked);
+-        b.disabled = p >= _numProgs || !unlocked;
+-        b.style.opacity = (p >= _numProgs) ? '0.2' : (_merWeak && !forceHdAudio ? '0.45' : '');
++        // Some stations announce SIS/SIG late; keep HD1-HD4 selectable while RF is locked.
++        b.disabled = !unlocked;
++        b.style.opacity = !unlocked ? '0.2' : (known ? '' : '0.65');
+     });
+
+     // Acquiring overlay — three distinct states
+diff --git a/NRSC5_HDRadio_frontend_server.js b/NRSC5_HDRadio_frontend_server.js
+index 66788c2..12440e4 100644
+--- a/NRSC5_HDRadio_frontend_server.js
++++ b/NRSC5_HDRadio_frontend_server.js
+@@ -327,7 +327,8 @@ function broadcastMeta() {
+         berNow:      metadata.berNow,
+         berAvg:      metadata.berAvg,
+         hdFormats:    metadata.hdFormats,
+-        numPrograms:  metadata.numPrograms
++        numPrograms:  metadata.numPrograms,
++        availablePrograms: metadata.availablePrograms
+     });
+ }
+
+@@ -351,6 +352,18 @@ function handleBridgeEvent(evt) {
+             hdLogInfo(`Bridge v${evt.version} running in ${evt.mode} mode`);
+             break;
+
++        case 'audio_program': {
++            const p = Number(evt.program);
++            if (Number.isInteger(p) && p >= 0 && p <= 7) {
++                const programs = new Set(metadata.availablePrograms || []);
++                programs.add(p);
++                metadata.availablePrograms = [...programs].sort((a, b) => a - b);
++                metadata.numPrograms = Math.max(metadata.numPrograms || 1, p + 1);
++                hdLogInfo(`Audio service detected: HD${p + 1}`);
++                broadcastMeta();
++            }
++            break;
++        }
+         case 'audio_first':
+             hdLogInfo(`First AUDIO event — event_program=${evt.event_program} want=${evt.want_program} data=${evt.data_len}B match=${evt.event_program === evt.want_program}`);
+             break;
+@@ -402,9 +415,13 @@ function handleBridgeEvent(evt) {
+             if (evt.alert   !== undefined) metadata.alert       = evt.alert;
+             if (evt.country !== undefined) metadata.country     = evt.country;
+             if (Array.isArray(evt.audioServices) && evt.audioServices.length > 0) {
+-                const svc = evt.audioServices.find(s => s.program === currentProgram);
++                const programs = evt.audioServices.map(s => Number(s.program)).filter(Number.isInteger);
++                const svc = evt.audioServices.find(s => Number(s.program) === currentProgram);
+                 if (svc) metadata.programType = svc.type.replace(/_/g, ' ');
+-                metadata.numPrograms = Math.max(...evt.audioServices.map(s => s.program)) + 1;
++                if (programs.length) {
++                    metadata.availablePrograms = [...new Set(programs)].sort((a, b) => a - b);
++                    metadata.numPrograms = Math.max(...programs) + 1;
++                }
+             }
+             // Directory lookup — add HD format names for all programs
+             if (evt.name) {
+@@ -469,8 +486,10 @@ function handleBridgeEvent(evt) {
+             if (Array.isArray(evt.services)) {
+                 const audioProgs = evt.services
+                     .filter(s => s.type === 'audio')
+-                    .map(s => s.program);
++                    .map(s => Number(s.program))
++                    .filter(Number.isInteger);
+                 if (audioProgs.length > 0) {
++                    metadata.availablePrograms = [...new Set(audioProgs)].sort((a, b) => a - b);
+                     metadata.numPrograms = Math.max(...audioProgs) + 1;
+                     broadcastMeta();
+                 }
+@@ -532,7 +551,7 @@ function resetMetadata() {
+         title: '', artist: '', album: '', genre: '',
+         bitRate: '', merLower: null, merUpper: null,
+         berNow: null, berAvg: null,
+-        hdFormats: null, numPrograms: 1
++        hdFormats: null, numPrograms: 1, availablePrograms: [0]
+     };
+     synchronized = false;
+ }
+@@ -744,10 +763,18 @@ function connectToPlugins() {
+                     break;
+
+                 case 'hd-radio-program': {
+-                    const p = msg.value?.program ?? 0;
+-                    currentProgram = p;
+-                    if (bridge) sendCmd({ cmd: 'program', value: p });
+-                    else if (hdEnabled) startBridge(currentFreq, p);
++                    const requested = Number(msg.value?.program);
++                    const p = Number.isInteger(requested) ? Math.max(0, Math.min(7, requested)) : 0;
++                    if (p !== currentProgram) {
++                        currentProgram = p;
++                        metadata.title = metadata.artist = metadata.album = metadata.genre = '';
++                        metadata.bitRate = '';
++                        metadata.programType = '';
++                        if (bridge) sendCmd({ cmd: 'program', value: p });
++                        else if (hdEnabled) startBridge(currentFreq, p);
++                        hdLogInfo(`Selecting HD${p + 1} without retuning receiver`);
++                    }
++                    broadcastMeta();
+                     break;
+                 }

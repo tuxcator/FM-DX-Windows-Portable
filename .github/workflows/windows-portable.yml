@@ -1,0 +1,73 @@
+name: Build Windows portable package
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths-ignore:
+      - '**/*.md'
+      - 'output/pdf/**'
+
+concurrency:
+  group: portable-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout sources and pinned submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Preflight repository
+        shell: powershell
+        run: .\scripts\Test-GitHubReady.ps1
+
+      - name: Build portable distribution
+        shell: powershell
+        run: .\scripts\Build-Portable.ps1
+
+      - name: Create ZIP and SHA-256
+        shell: powershell
+        run: |
+          $version = (Get-Content -Raw .\project.json | ConvertFrom-Json).version
+          $zip = ".\dist\FM-DX-Windows-Portable-$version.zip"
+          Compress-Archive -Path .\dist\FM-DX-Windows-Portable -DestinationPath $zip -Force
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLowerInvariant()
+          "$hash  $([IO.Path]::GetFileName($zip))" | Set-Content -Encoding ascii "$zip.sha256"
+
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FM-DX-Windows-Portable
+          path: |
+            dist/FM-DX-Windows-Portable-*.zip
+            dist/FM-DX-Windows-Portable-*.zip.sha256
+          retention-days: 14
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified build
+        uses: actions/download-artifact@v4
+        with:
+          name: FM-DX-Windows-Portable
+          path: release
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" release/* --verify-tag --generate-notes --title "FM-DX Windows Portable ${GITHUB_REF_NAME}"

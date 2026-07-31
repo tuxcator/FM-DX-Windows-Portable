@@ -1,0 +1,273 @@
+diff --git a/NRSC5_HDRadio_frontend.js b/NRSC5_HDRadio_frontend.js
+index c1e0ab9..90957f3 100644
+--- a/NRSC5_HDRadio_frontend.js
++++ b/NRSC5_HDRadio_frontend.js
+@@ -2400,7 +2400,6 @@ document.addEventListener('DOMContentLoaded', () => {
+     buildDashboard();
+     addPanelButton();
+     addInlineHdIndicator();
+-    interceptTuneButtons();
+     setupSignalOverlay();
+     connectPlugin();
+     refreshIcon();
+diff --git a/NRSC5_HDRadio_frontend_server.js b/NRSC5_HDRadio_frontend_server.js
+index 3e68cb1..ee59bfc 100644
+--- a/NRSC5_HDRadio_frontend_server.js
++++ b/NRSC5_HDRadio_frontend_server.js
+@@ -121,10 +121,14 @@ function lookupStation(freq, callsign) {
+ const config     = require('../../config.json');
+ const { logInfo, logWarn, logError } = require('../../server/console');
+ const pluginsApi = require('../../server/plugins_api');
++const audioServer = require('../../server/stream/3las.server');
++const dataHandler = require('../../server/datahandler');
+
+ const rootDir      = path.dirname(require.main.filename);
+ const pluginDir    = path.join(rootDir, 'plugins', 'NRSC5_HDRadio');
+-const bridgePath   = path.join(pluginDir, 'hd_bridge.py');
++const hybridBridgePath = path.join(pluginDir, 'hybrid_bridge.py');
++const rtlCapturePath = path.join(pluginDir, 'rtl_hybrid.exe');
++const airspyCapturePath = path.join(pluginDir, 'airspyhf_hybrid.exe');
+ const configFilePath = path.join(rootDir, 'plugins_configs', 'NRSC5_HDRadio.json');
+
+ const DEFAULT_CONFIG = {
+@@ -144,6 +147,8 @@ let pluginConfig = { ...DEFAULT_CONFIG };
+ // ── Runtime state ─────────────────────────────────────────────────────────────
+ let bridge        = null;    // child process
+ let hdEnabled     = false;
++let rtlCapture    = null;
++let retuneTimer   = null;
+ let currentFreq   = 87.5;
+ let currentProgram = 0;
+ let synchronized  = false;
+@@ -199,8 +204,8 @@ async function runHdScan(startMHz, endMHz, stepMHz, signalWindowMs, syncWindowMs
+
+         // Tune bridge to this frequency
+         resetMetadata();
+-        if (bridge) sendCmd({ cmd: 'freq', value: freq });
+-        else { startBridge(freq, 0); await _sleep(1500); }
++        retuneLive(freq, 0);
++        await _sleep(180);
+
+         // Phase 1 — wait up to signalWindowMs for any HD carrier energy
+         const t1 = Date.now() + signalWindowMs;
+@@ -241,7 +246,7 @@ async function runHdScan(startMHz, endMHz, stepMHz, signalWindowMs, syncWindowMs
+         stopBridge();
+         hdEnabled = false;
+     } else if (bridge) {
+-        sendCmd({ cmd: 'freq', value: savedFreq });
++        retuneLive(savedFreq, savedProgram);
+     }
+     broadcastMeta();
+
+@@ -466,11 +471,45 @@ function handleBridgeEvent(evt) {
+ // ── Send command to bridge ────────────────────────────────────────────────────
+
+ function sendCmd(cmd) {
+-    if (bridge && bridge.stdin && !bridge.stdin.destroyed) {
+-        try { bridge.stdin.write(JSON.stringify(cmd) + '\n'); } catch (_) {}
++    if (bridge && bridge.stdio[3] && !bridge.stdio[3].destroyed) {
++        try { bridge.stdio[3].write(JSON.stringify(cmd) + '\n'); } catch (_) {}
+     }
+ }
+
++function retuneLive(freq, program = currentProgram) {
++    currentFreq = freq;
++    currentProgram = program;
++    resetMetadata();
++    broadcastMeta();
++    if (!bridge || !rtlCapture || !rtlCapture.stdin || rtlCapture.stdin.destroyed) {
++        startBridge(freq, program);
++        return;
++    }
++    try {
++        rtlCapture.stdin.write(`F${Math.round(freq * 1000000)}\n`);
++        sendCmd({ cmd: 'freq', value: freq });
++        sendCmd({ cmd: 'program', value: program });
++        hdLogInfo(`Live retune -> ${freq.toFixed(3)} MHz (capture and streams kept open)`);
++    } catch (e) {
++        hdLogWarn(`Live retune failed (${e.message}); restarting receiver`);
++        startBridge(freq, program);
++    }
++}
++
++function publishRtlMetric(levelDbfs, snrDb) {
++    const signal = Math.max(0, Math.min(60, Number(snrDb)));
++    if (!Number.isFinite(signal)) return;
++    dataHandler.dataToSend.sig = signal;
++    dataHandler.initialData.sig = signal;
++    dataHandler.dataToSend.sigRaw = `S${signal.toFixed(1)}`;
++    dataHandler.initialData.sigRaw = dataHandler.dataToSend.sigRaw;
++    dataHandler.dataToSend.rtlLevelDbfs = Number(levelDbfs);
++    dataHandler.initialData.rtlLevelDbfs = Number(levelDbfs);
++    const highest = Number(dataHandler.dataToSend.sigTop);
++    if (!Number.isFinite(highest) || signal > highest)
++        dataHandler.dataToSend.sigTop = signal.toFixed(1);
++}
++
+ // ── Bridge process lifecycle ──────────────────────────────────────────────────
+
+ function resetMetadata() {
+@@ -493,25 +533,56 @@ function startBridge(freq, program) {
+
+     const gainArg = pluginConfig.autoGain ? 'auto' : String(pluginConfig.gain);
+
+-    const args = [
+-        '-u',           // force unbuffered stdout so audio chunks reach Node.js immediately
+-        bridgePath,
+-        pluginConfig.nrsc5PyDir,
+-        String(pluginConfig.deviceIndex),
+-        String(pluginConfig.ppm),
+-        String(freq),
+-        String(program),
+-        gainArg
+-    ];
++    const receiver = pluginConfig.receiver === 'rtl' ? 'rtl' : 'airspyhf';
++    const iqFormat = receiver === 'airspyhf' ? 'cf32' : 'cu8';
++    const capturePath = receiver === 'airspyhf' ? airspyCapturePath : rtlCapturePath;
++    const args = ['-u', hybridBridgePath, pluginConfig.nrsc5PyDir,
++        String(freq), String(program), gainArg, iqFormat];
++    const captureArgs = receiver === 'airspyhf'
++        ? [String(Math.round(freq * 1000000)), String(pluginConfig.airspySerial || 'auto'), String(pluginConfig.airspyAttenuation || 0)]
++        : [String(Math.round(freq * 1000000)), String(pluginConfig.deviceIndex), gainArg, String(pluginConfig.ppm)];
+
+     hdLogInfo(`Spawning bridge: ${pluginConfig.python3} ${args.join(' ')}`);
+
+     try {
+-        bridge = spawn(pluginConfig.python3, args, { stdio: ['pipe', 'pipe', 'pipe'] });
++        bridge = spawn(pluginConfig.python3, args, { stdio: ['pipe', 'pipe', 'pipe', 'pipe'] });
+     } catch (e) {
+         hdLogError(`Failed to spawn bridge: ${e.message}`);
+         return;
+     }
++    try {
++        rtlCapture = spawn(capturePath, captureArgs, { stdio: ['pipe', 'pipe', 'pipe', 'pipe'] });
++        rtlCapture.stdio[3].pipe(bridge.stdin);
++        audioServer.waitUntilReady.then(() => {
++            if (audioServer.Server && rtlCapture) audioServer.Server.SetInput(rtlCapture.stdout);
++        });
++        const captureProcess = rtlCapture;
++        let captureLineBuf = '';
++        captureProcess.stderr.on('data', data => {
++            captureLineBuf += data.toString();
++            let nl;
++            while ((nl = captureLineBuf.indexOf('\n')) !== -1) {
++                const line = captureLineBuf.slice(0, nl).trim();
++                captureLineBuf = captureLineBuf.slice(nl + 1);
++                if (!line) continue;
++                const metric = line.match(/^METRIC level_dbfs=([-0-9.]+) snr_db=([-0-9.]+)/);
++                if (metric) publishRtlMetric(metric[1], metric[2]);
++                else hdLogInfo(`[${receiver} analog] ${line}`);
++            }
++        });
++        captureProcess.on('exit', (code, signal) => {
++            if (rtlCapture !== captureProcess) return;
++            rtlCapture = null;
++            hdLogWarn(`${receiver} capture exited (code=${code}, signal=${signal})`);
++            if (config.portableRtlMode || hdEnabled) setTimeout(() => {
++                if ((config.portableRtlMode || hdEnabled) && !rtlCapture) startBridge(currentFreq, currentProgram);
++            }, 500);
++        });
++    } catch (e) {
++        hdLogError(`Failed to start shared RTL capture: ${e.message}`);
++        stopBridge();
++        return;
++    }
+
+     // stdout → raw PCM → audio clients
+     let _firstChunk = true;
+@@ -560,10 +626,13 @@ function startBridge(freq, program) {
+         }
+     });
+
+-    bridge.on('exit', (code, signal) => {
++    const bridgeProcess = bridge;
++    bridgeProcess.on('exit', (code, signal) => {
+         hdLogInfo(`Bridge exited (code=${code}, signal=${signal})`);
++        if (bridge !== bridgeProcess) return;
+         bridge = null;
+         synchronized = false;
++        if (rtlCapture) { const capture = rtlCapture; rtlCapture = null; capture.kill('SIGTERM'); }
+         if (hdEnabled) broadcastMeta();
+     });
+
+@@ -571,9 +640,20 @@ function startBridge(freq, program) {
+ }
+
+ function stopBridge() {
+-    if (!bridge) return;
+-    sendCmd({ cmd: 'quit' });
+-    setTimeout(() => { if (bridge) { bridge.kill('SIGTERM'); bridge = null; } }, 1000);
++    clearTimeout(retuneTimer);
++    const oldBridge = bridge;
++    const oldCapture = rtlCapture;
++    bridge = null;
++    rtlCapture = null;
++    if (oldBridge) {
++        try {
++            if (oldBridge.stdio[3] && !oldBridge.stdio[3].destroyed)
++                oldBridge.stdio[3].write(JSON.stringify({ cmd: 'quit' }) + '\n');
++            oldBridge.stdin.destroy();
++        } catch (_) {}
++        setTimeout(() => { if (!oldBridge.killed) oldBridge.kill('SIGTERM'); }, 500);
++    }
++    if (oldCapture && !oldCapture.killed) oldCapture.kill('SIGTERM');
+     hdLogInfo(`Bridge stopping`);
+ }
+
+@@ -643,7 +723,6 @@ function connectToPlugins() {
+
+                 case 'hd-radio-disable':
+                     hdEnabled = false;
+-                    stopBridge();
+                     broadcastMeta();
+                     break;
+
+@@ -661,8 +740,7 @@ function connectToPlugins() {
+                     pluginConfig.autoGain = false;
+                     saveConfigField('gain', g);
+                     saveConfigField('autoGain', false);
+-                    if (bridge) sendCmd({ cmd: 'gain', value: g });
+-                    else if (hdEnabled) startBridge(currentFreq, currentProgram);
++                    if (hdEnabled) startBridge(currentFreq, currentProgram);
+                     hdLogInfo(`Gain → ${g} dB`);
+                     broadcastMeta();
+                     break;
+@@ -687,7 +765,7 @@ function connectToPlugins() {
+                 case 'hd-radio-auto-gain': {
+                     pluginConfig.autoGain = true;
+                     saveConfigField('autoGain', true);
+-                    if (bridge) sendCmd({ cmd: 'auto_gain' });
++                    if (hdEnabled) startBridge(currentFreq, currentProgram);
+                     broadcastMeta();
+                     break;
+                 }
+@@ -736,7 +814,7 @@ function connectToMain() {
+             if (!freqKnown) {
+                 freqKnown = true;
+                 currentFreq = newFreq;
+-                if (pluginConfig.autoStart) {
++                if (config.portableRtlMode || pluginConfig.autoStart) {
+                     hdLogInfo(`autoStart — ${newFreq} MHz`);
+                     hdEnabled = true;
+                     startBridge(newFreq, currentProgram);
+@@ -749,16 +827,10 @@ function connectToMain() {
+
+             if (scanActive) return; // scan controls frequency — ignore main tracker
+
+-            if (hdEnabled) {
+-                // Prefer live retune if bridge supports it; fall back to restart
+-                if (bridge) {
+-                    hdLogInfo(`Retuning to ${newFreq} MHz`);
+-                    resetMetadata();
+-                    broadcastMeta(); // tell frontend immediately: sync lost, stop audio
+-                    sendCmd({ cmd: 'freq', value: newFreq });
+-                } else {
+-                    startBridge(newFreq, currentProgram);
+-                }
++            if (config.portableRtlMode || hdEnabled) {
++                hdLogInfo(`Retuning analog + HD to ${newFreq} MHz`);
++                clearTimeout(retuneTimer);
++                retuneTimer = setTimeout(() => retuneLive(newFreq, currentProgram), 35);
+             }
+         } catch (_) {}
+     });
