@@ -17,7 +17,7 @@ Aplicacion portable para Windows 10/11 x64 que integra FM-DX Webserver, FM analo
 Clone con submodulos y construya:
 
 ```powershell
-git clone --recurse-submodules https://github.com/USUARIO/FM-DX-Windows-Portable.git
+git clone --recurse-submodules https://github.com/tuxcator/FM-DX-Windows-Portable.git
 cd FM-DX-Windows-Portable
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Build-Portable.ps1
 ```
