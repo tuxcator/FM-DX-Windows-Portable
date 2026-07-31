@@ -1,4 +1,4 @@
-# FM-DX Windows Portable
+# FM-DX Windows Portable con HD Radio Integrado.
 
 Aplicacion portable para Windows 10/11 x64 que integra FM-DX Webserver, FM analogica estereo, RDS y NRSC-5 HD Radio usando Airspy HF+ Discovery, RTL-SDR o TEF668x/XDR.
 
