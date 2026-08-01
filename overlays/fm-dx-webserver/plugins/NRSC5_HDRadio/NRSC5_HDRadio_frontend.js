@@ -426,6 +426,8 @@ let debugOpen    = false;
 
 let enhancedMeta   = true;   // mirrors server config, controlled by toggle
 let forceHdAudio   = false;  // mirrors server config — global, persisted, all users see same state
+let analogBandwidthKhz = 190;
+let receiverType = 'airspyhf';
 
 // iTunes album art — fetch when we have title+artist and enhanced meta is on
 let _lastItunesQuery = '';
@@ -1161,6 +1163,8 @@ function applyMeta(v) {
     }
     if (v.enhancedMeta  !== undefined) enhancedMeta  = v.enhancedMeta;
     if (v.forceHdAudio  !== undefined) forceHdAudio  = v.forceHdAudio;
+    if ([120, 140, 160, 190].includes(Number(v.analogBandwidthKhz))) analogBandwidthKhz = Number(v.analogBandwidthKhz);
+    if (v.receiver) receiverType = v.receiver;
 
     // Inject HD signal quality into the global `data` object so signal monitor
     // plugins can display it. Uses `hdBer`/`hdMer` keys to avoid conflicts.
@@ -1865,6 +1869,19 @@ function buildDashboard() {
         #hd-sig-quality .hd-sig-bar  { width:5px;border-radius:2px;transition:background .4s; }
         #hd-sig-quality .hd-sig-label { font-size:11px;font-weight:700;letter-spacing:1px; }
         #hd-grip:hover { color:#4466aa; }
+        #hd-dash .hd-bw-grid {
+            display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;flex:1;min-width:0;
+        }
+        #hd-dash .hd-bw-btn {
+            min-width:0;background:#10162a;color:#6f82a8;border:1px solid #29375b;
+            border-radius:7px;padding:7px 3px;font-size:10px;font-weight:700;
+            letter-spacing:.2px;cursor:pointer;transition:all .15s;white-space:nowrap;
+        }
+        #hd-dash .hd-bw-btn:hover { border-color:#4d76bd;color:#b7d3ff; }
+        #hd-dash .hd-bw-btn.active {
+            background:#123252;color:#8dd8ff;border-color:#2d8bd2;
+            box-shadow:0 0 10px rgba(45,139,210,.28);
+        }
         .hd-toggle-on  { background:#6a1515!important;color:#ff8888!important;border-color:#8a2222!important; }
         .hd-toggle-off { background:#122060!important;color:#88aaff!important;border-color:#2244aa!important; }
         @keyframes hd-flash { 0%,100%{opacity:1} 50%{opacity:0.2} }
@@ -1966,6 +1983,17 @@ function buildDashboard() {
                     <div class="hd-info-label">HD Volume</div>
                     <input type="range" id="hd-volume" min="0" max="100" value="80">
                 </div>
+            </div>
+
+            <div id="hd-bandwidth-row" style="display:flex;align-items:center;gap:8px;background:rgba(5,10,35,.5);border:1px solid #161e40;border-radius:9px;padding:8px 10px;">
+                <div style="font-size:9px;letter-spacing:1.5px;color:#3d4a70;text-transform:uppercase;white-space:nowrap;">FM SELECTIVITY</div>
+                <div class="hd-bw-grid">
+                    <button class="hd-bw-btn tooltip" data-bw="190" data-tooltip="DX 190 kHz: audio estéreo y RDS completos; selectividad moderada">DX 190</button>
+                    <button class="hd-bw-btn tooltip" data-bw="160" data-tooltip="DX 160 kHz: equilibrio para separar una adyacente fuerte">DX 160</button>
+                    <button class="hd-bw-btn tooltip" data-bw="140" data-tooltip="DX 140 kHz: alta selectividad contra canales adyacentes">DX 140</button>
+                    <button class="hd-bw-btn tooltip" data-bw="120" data-tooltip="DX 120 kHz: selectividad máxima; puede reducir estéreo o RDS con desviación muy ancha">DX 120</button>
+                </div>
+                <span id="hd-bandwidth-status" style="font-size:9px;color:#62a5d4;white-space:nowrap;">190 kHz</span>
             </div>
 
             <!-- SDR Gain row -->
@@ -2244,6 +2272,16 @@ function buildDashboard() {
         if (gainNode) gainNode.gain.value = e.target.value / 100;
     });
 
+    dash.querySelectorAll('.hd-bw-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const bandwidthKhz = Number(btn.dataset.bw);
+            if (![120, 140, 160, 190].includes(bandwidthKhz)) return;
+            analogBandwidthKhz = bandwidthKhz;
+            send('hd-radio-bandwidth', { bandwidthKhz });
+            refreshDash();
+        });
+    });
+
     // Gain slider ↔ number input sync
     const gainSlider = document.getElementById('hd-gain-slider');
     const gainNum    = document.getElementById('hd-gain-num');
@@ -2362,6 +2400,16 @@ function refreshDash() {
     }
 
     if (tog)  { tog.textContent = hdEnabled ? 'HD RADIO OFF' : 'HD AUTO'; tog.className = hdEnabled ? 'hd-toggle-on' : 'hd-toggle-off'; }
+
+    const bandwidthRow = g('hd-bandwidth-row');
+    if (bandwidthRow) bandwidthRow.style.display = receiverType === 'airspyhf' ? 'flex' : 'none';
+    document.querySelectorAll('#hd-dash .hd-bw-btn').forEach(btn => {
+        const active = Number(btn.dataset.bw) === analogBandwidthKhz;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    const bandwidthStatus = g('hd-bandwidth-status');
+    if (bandwidthStatus) bandwidthStatus.textContent = analogBandwidthKhz + ' kHz';
 
     const enhBtn  = g('hd-enhanced-toggle');
     const enhDesc = g('hd-enhanced-desc');

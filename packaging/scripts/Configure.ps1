@@ -18,6 +18,10 @@ if (-not $main.PSObject.Properties['portableHardware']) {
 }
 
 
+if (-not $main.PSObject.Properties['tuningAccess']) {
+    $main | Add-Member -NotePropertyName tuningAccess -NotePropertyValue ([pscustomobject]@{ mode = 'admin'; maxControllers = 2; sessionMinutes = 60 })
+}
+
 Write-Host 'Configurador de FM-DX Windows Portable' -ForegroundColor Cyan
 Write-Host ''
 Write-Host 'Modo de sintonizador:'
@@ -59,10 +63,13 @@ if ($port -match '^\d+$' -and [int]$port -ge 1024 -and [int]$port -le 65535) { $
 
 if (-not $hd.PSObject.Properties['airspySerial']) { $hd | Add-Member -NotePropertyName airspySerial -NotePropertyValue 'auto' }
 if (-not $hd.PSObject.Properties['airspyAttenuation']) { $hd | Add-Member -NotePropertyName airspyAttenuation -NotePropertyValue 0 }
+if (-not $hd.PSObject.Properties['analogBandwidthKhz']) { $hd | Add-Member -NotePropertyName analogBandwidthKhz -NotePropertyValue 190 }
 $airspySerial = Read-Host "Serie Airspy HF+ o auto [$($hd.airspySerial)]"
 if ($airspySerial) { $hd.airspySerial = $airspySerial }
 $airspyAttenuation = Read-Host "Atenuacion Airspy HF+ en dB [$($hd.airspyAttenuation)]"
 if ($airspyAttenuation -match '^\d+(\.\d+)?$') { $hd.airspyAttenuation = [double]$airspyAttenuation }
+$airspyBandwidth = Read-Host "Filtro Airspy FM DX: 190, 160, 140 o 120 kHz [$($hd.analogBandwidthKhz)]"
+if ($airspyBandwidth -match '^(120|140|160|190)$') { $hd.analogBandwidthKhz = [int]$airspyBandwidth }
 $device = Read-Host "Índice del RTL-SDR para HD Radio [$($hd.deviceIndex)]"
 if ($device -match '^\d+$') { $hd.deviceIndex = [int]$device }
 
@@ -75,6 +82,12 @@ if ($ppm -match '^-?\d+$') { $hd.ppm = [int]$ppm }
 $autoStart = Read-Host '¿Iniciar HD Radio automáticamente? (s/N)'
 $hd.autoStart = $autoStart -match '^[sSyY]'
 
+$tuningMode = Read-Host "Acceso de sintonia: public, limited o admin [$($main.tuningAccess.mode)]"
+if ($tuningMode -match '^(public|limited|admin)$') { $main.tuningAccess.mode = $tuningMode }
+$tuningUsers = Read-Host "Usuarios simultaneos permitidos: 1 o 2 [$($main.tuningAccess.maxControllers)]"
+if ($tuningUsers -match '^[12]$') { $main.tuningAccess.maxControllers = [int]$tuningUsers }
+$tuningMinutes = Read-Host "Duracion maxima de una reserva de sintonia: 30 o 60 minutos [$($main.tuningAccess.sessionMinutes)]"
+if ($tuningMinutes -match '^(30|60)$') { $main.tuningAccess.sessionMinutes = [int]$tuningMinutes }
 Save-Json $main $mainPath
 Save-Json $hd $hdPath
 $hardware = & (Join-Path $PSScriptRoot 'Detect-Hardware.ps1') -Root $root -Quiet

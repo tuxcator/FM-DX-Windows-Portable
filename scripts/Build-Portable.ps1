@@ -12,8 +12,9 @@ $manifest = Get-ProjectManifest
 $thirdParty = Join-Path $root 'third_party'
 $sourceFmdx = Join-Path $thirdParty 'fm-dx-webserver'
 $sourcePlugin = Join-Path $thirdParty 'NRSC5_HDRadio\NRSC5_HDRadio'
+$sourceSpectrum = Join-Path $thirdParty 'SpectrumGraph'
 
-foreach ($required in @($sourceFmdx, $sourcePlugin, (Join-Path $thirdParty 'airspyhf'), (Join-Path $thirdParty 'nrsc5'), (Join-Path $thirdParty 'nrsc5-gui'), (Join-Path $thirdParty 'redsea'), (Join-Path $thirdParty 'liquid-dsp'))) {
+foreach ($required in @($sourceFmdx, $sourcePlugin, (Join-Path $thirdParty 'airspyhf'), (Join-Path $thirdParty 'nrsc5'), (Join-Path $thirdParty 'nrsc5-gui'), (Join-Path $thirdParty 'redsea'), (Join-Path $thirdParty 'liquid-dsp'), $sourceSpectrum)) {
     if (-not (Test-Path -LiteralPath $required)) {
         throw "Falta una fuente requerida: $required. Ejecute git submodule update --init --recursive."
     }
@@ -35,8 +36,36 @@ foreach ($required in @($node, $npm, $python, $nrsc5, $rtlHybrid, $airspyHybrid,
     if (-not (Test-Path -LiteralPath $required)) { throw "Runtime faltante: $required" }
 }
 
+function Merge-ConfigDefaults([object]$Active, [object]$Defaults) {
+    foreach ($property in $Defaults.PSObject.Properties) {
+        $existing = $Active.PSObject.Properties[$property.Name]
+        if (-not $existing) {
+            $Active | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value
+            continue
+        }
+        if ($existing.Value -is [pscustomobject] -and $property.Value -is [pscustomobject]) {
+            Merge-ConfigDefaults $existing.Value $property.Value
+        }
+    }
+}
 $distRoot = Join-Path $root 'dist\FM-DX-Windows-Portable'
 $appDir = Join-Path $distRoot 'app'
+$existingMainPath = Join-Path $appDir 'config.json'
+$existingHdPath = Join-Path $appDir 'plugins_configs\NRSC5_HDRadio.json'
+$preservedMainConfig = $null
+$preservedHdConfig = $null
+try {
+    if (Test-Path -LiteralPath $existingMainPath) {
+        $preservedMainConfig = Get-Content -Raw -LiteralPath $existingMainPath | ConvertFrom-Json
+    }
+    if (Test-Path -LiteralPath $existingHdPath) {
+        $preservedHdConfig = Get-Content -Raw -LiteralPath $existingHdPath | ConvertFrom-Json
+    }
+} catch {
+    Write-Warning 'No se pudo leer la configuracion activa; se usaran las plantillas.'
+    $preservedMainConfig = $null
+    $preservedHdConfig = $null
+}
 Write-Step 'Preparando la distribución limpia'
 Reset-ProjectDirectory $distRoot
 Copy-DirectoryContents $sourceFmdx $appDir @('.git')
@@ -75,6 +104,7 @@ try {
 } finally {
     Set-Location $oldLocation
 }
+& (Join-Path $root 'scripts\Apply-Tuner-Lock-Fix.ps1') -AppDir $appDir
 $dataHandlerPath = Join-Path $appDir 'server\datahandler.js'
 $dataHandlerText = [System.IO.File]::ReadAllText($dataHandlerPath)
 $dataHandlerExport = 'handleData, showOnlineUsers, dataToSend, initialData, resetToDefault, state'
@@ -87,6 +117,7 @@ $dataHandlerText = [regex]::Replace($dataHandlerText, $piPattern, $piReplacement
 [System.IO.File]::WriteAllText($dataHandlerPath, $dataHandlerText, [System.Text.UTF8Encoding]::new($false))
 
 Copy-Item -LiteralPath (Join-Path $root 'overlays\fm-dx-webserver\server\rtl_virtual_output.js') -Destination (Join-Path $appDir 'server\rtl_virtual_output.js') -Force
+Copy-Item -LiteralPath (Join-Path $root 'overlays\fm-dx-webserver\server\tuning_access.js') -Destination (Join-Path $appDir 'server\tuning_access.js') -Force
 $streamDir = Join-Path $appDir 'server\stream'
 Copy-Item -LiteralPath (Join-Path $root 'overlays\fm-dx-webserver\server\stream\parser.js') -Destination (Join-Path $streamDir 'parser.js') -Force
 Copy-Item -LiteralPath (Join-Path $root 'overlays\fm-dx-webserver\server\stream\index.js') -Destination (Join-Path $streamDir 'index.js') -Force
@@ -126,16 +157,41 @@ Copy-Item -LiteralPath (Join-Path $root 'overlays\fm-dx-webserver\plugins\NRSC5_
 Copy-Item -LiteralPath (Join-Path $root 'overlays\fm-dx-webserver\plugins\NRSC5_HDRadio\NRSC5_HDRadio_frontend_server.js') -Destination (Join-Path $pluginDir 'NRSC5_HDRadio_frontend_server.js') -Force
 Copy-Item -LiteralPath (Join-Path $root 'overlays\fm-dx-webserver\plugins\NRSC5_HDRadio\NRSC5_HDRadio_frontend.js') -Destination (Join-Path $pluginDir 'NRSC5_HDRadio_frontend.js') -Force
 Copy-Item -LiteralPath (Join-Path $root 'overlays\fm-dx-webserver\plugins\NRSC5_HDRadio\analog_rds.js') -Destination (Join-Path $pluginDir 'analog_rds.js') -Force
+Copy-Item -LiteralPath (Join-Path $root 'overlays\fm-dx-webserver\plugins\NRSC5_HDRadio\spectrum_analyzer.js') -Destination (Join-Path $pluginDir 'spectrum_analyzer.js') -Force
 
 [System.IO.File]::WriteAllText($bridgePath, $bridgeText, [System.Text.UTF8Encoding]::new($false))
 
 Copy-DirectoryContents (Join-Path $root 'runtime\nrsc5') $pluginDir @('licenses', 'manifest.json')
 Copy-Item -LiteralPath (Join-Path $root 'overlays\fm-dx-webserver\plugins\NRSC5_HDRadio.js') -Destination (Join-Path $appDir 'plugins\NRSC5_HDRadio.js') -Force
+$spectrumDir = Join-Path $appDir 'plugins\SpectrumGraph'
+New-Item -ItemType Directory -Path $spectrumDir -Force | Out-Null
+$spectrumFrontendSource = [IO.File]::ReadAllText((Join-Path $sourceSpectrum 'SpectrumGraph\pluginSpectrumGraph.js'))
+$spectrumFrontendWrapped = "(() => {" + [Environment]::NewLine + $spectrumFrontendSource + [Environment]::NewLine + "})();" + [Environment]::NewLine
+[IO.File]::WriteAllText((Join-Path $spectrumDir 'pluginSpectrumGraph.js'), $spectrumFrontendWrapped, [Text.UTF8Encoding]::new($false))
+Copy-Item -LiteralPath (Join-Path $root 'overlays\fm-dx-webserver\plugins\SpectrumGraph\pluginSpectrumGraph_server.js') -Destination (Join-Path $spectrumDir 'pluginSpectrumGraph_server.js') -Force
+Copy-Item -LiteralPath (Join-Path $root 'overlays\fm-dx-webserver\plugins\SpectrumGraph.js') -Destination (Join-Path $appDir 'plugins\SpectrumGraph.js') -Force
 
 $pluginsConfigDir = Join-Path $appDir 'plugins_configs'
 New-Item -ItemType Directory -Path $pluginsConfigDir -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $root 'config\config.json') -Destination (Join-Path $appDir 'config.json') -Force
 Copy-Item -LiteralPath (Join-Path $root 'config\NRSC5_HDRadio.json') -Destination (Join-Path $pluginsConfigDir 'NRSC5_HDRadio.json') -Force
+if ($preservedMainConfig) {
+    $mainDefaults = Get-Content -Raw -LiteralPath (Join-Path $appDir 'config.json') | ConvertFrom-Json
+    $hadTuningAccess = $null -ne $preservedMainConfig.PSObject.Properties['tuningAccess']
+    Merge-ConfigDefaults $preservedMainConfig $mainDefaults
+    if (-not $hadTuningAccess) {
+        $preservedMainConfig.tuningAccess.mode = if ($preservedMainConfig.lockToAdmin) { 'admin' } elseif ($preservedMainConfig.publicTuner) { 'public' } else { 'limited' }
+    }
+    $preservedMainConfig.plugins = @($mainDefaults.plugins + $preservedMainConfig.plugins | Select-Object -Unique)
+    Save-JsonUtf8 $preservedMainConfig (Join-Path $appDir 'config.json')
+    Write-Ok 'Configuracion activa y contrasenas conservadas.'
+}
+if ($preservedHdConfig) {
+    $hdDefaults = Get-Content -Raw -LiteralPath (Join-Path $pluginsConfigDir 'NRSC5_HDRadio.json') | ConvertFrom-Json
+    Merge-ConfigDefaults $preservedHdConfig $hdDefaults
+    Save-JsonUtf8 $preservedHdConfig (Join-Path $pluginsConfigDir 'NRSC5_HDRadio.json')
+    Write-Ok 'Configuracion activa del receptor conservada.'
+}
 Copy-Item -LiteralPath (Join-Path $root 'overlays\fm-dx-webserver\tools\list-audio-devices.js') -Destination (Join-Path $appDir 'list-audio-devices.js') -Force
 
 New-Item -ItemType Directory -Path (Join-Path $distRoot 'runtime') -Force | Out-Null
@@ -162,6 +218,7 @@ $licenses = Join-Path $distRoot 'licenses'
 New-Item -ItemType Directory -Path $licenses -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $thirdParty 'fm-dx-webserver\LICENSE') -Destination (Join-Path $licenses 'fm-dx-webserver-GPL-3.0.txt') -Force
 Copy-Item -LiteralPath (Join-Path $thirdParty 'nrsc5\LICENSE') -Destination (Join-Path $licenses 'nrsc5-GPL-3.0.txt') -Force
+Copy-Item -LiteralPath (Join-Path $sourceSpectrum 'LICENSE') -Destination (Join-Path $licenses 'SpectrumGraph-MIT.txt') -Force
 if (Test-Path -LiteralPath (Join-Path $root 'runtime\nrsc5\licenses')) {
     Copy-Item -LiteralPath (Join-Path $root 'runtime\nrsc5\licenses') -Destination $licenses -Recurse -Force
 }

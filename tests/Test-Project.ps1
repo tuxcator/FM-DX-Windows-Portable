@@ -17,16 +17,19 @@ Write-Host 'Ejecutando pruebas del proyecto...' -ForegroundColor Cyan
 
 foreach ($relative in @(
     'project.json', 'README.md', 'config\config.json', 'config\NRSC5_HDRadio.json',
-    'scripts\Build-Portable.ps1', 'scripts\Get-Runtimes.ps1', 'scripts\Get-Nrsc5.ps1', 'scripts\Build-Nrsc5.ps1', 'scripts\Update-GitHub.ps1', 'Actualizar-GitHub.cmd',
+    'scripts\Build-Portable.ps1', 'scripts\Apply-Tuner-Lock-Fix.ps1', 'scripts\Get-Runtimes.ps1', 'scripts\Get-Nrsc5.ps1', 'scripts\Build-Nrsc5.ps1', 'scripts\Update-GitHub.ps1', 'Actualizar-GitHub.cmd',
     'packaging\scripts\Detect-Hardware.ps1', 'packaging\scripts\Configure-RemotePasswords.ps1',
     'packaging\scripts\Enable-Network.ps1',
     'packaging\scripts\Publish-Internet.ps1', 'packaging\Configurar-Contrasenas.cmd',
     'packaging\Habilitar-Red-Local.cmd',
-    'packaging\Publicar-Internet.cmd', 'overlays\fm-dx-webserver\server\rtl_virtual_output.js',
+    'packaging\Publicar-Internet.cmd', 'overlays\fm-dx-webserver\server\rtl_virtual_output.js', 'overlays\fm-dx-webserver\server\tuning_access.js',
     'overlays\fm-dx-webserver\server\stream\parser.js', 'overlays\fm-dx-webserver\server\stream\index.js',
     'overlays\fm-dx-webserver\plugins\NRSC5_HDRadio\hybrid_bridge.py',
     'overlays\fm-dx-webserver\plugins\NRSC5_HDRadio\analog_rds.js',
     'overlays\fm-dx-webserver\plugins\NRSC5_HDRadio\NRSC5_HDRadio_frontend_server.js',
+    'overlays\fm-dx-webserver\plugins\NRSC5_HDRadio\spectrum_analyzer.js',
+    'overlays\fm-dx-webserver\plugins\SpectrumGraph.js',
+    'overlays\fm-dx-webserver\plugins\SpectrumGraph\pluginSpectrumGraph_server.js',
     'overlays\fm-dx-webserver\plugins\NRSC5_HDRadio\NRSC5_HDRadio_frontend.js',
     'native\rtl_hybrid\rtl_hybrid.c', 'native\airspyhf_hybrid\airspyhf_hybrid.c',
     'patches\fm-dx-webserver-rtl.patch', 'patches\nrsc5-plugin-hybrid.patch', 'patches\nrsc5-python-cf32.patch',
@@ -36,7 +39,8 @@ foreach ($relative in @(
     'patches\nrsc5-subchannels.patch',
     'third_party\fm-dx-webserver\package-lock.json',
     'third_party\NRSC5_HDRadio\NRSC5_HDRadio\hd_bridge.py',
-    'third_party\nrsc5\CMakeLists.txt', 'third_party\nrsc5-gui\nrsc5_gui.py'
+    'third_party\nrsc5\CMakeLists.txt', 'third_party\nrsc5-gui\nrsc5_gui.py',
+    'third_party\SpectrumGraph\SpectrumGraph\pluginSpectrumGraph.js', 'third_party\SpectrumGraph\LICENSE'
 )) {
     Assert-True (Test-Path -LiteralPath (Join-Path $root $relative)) "Falta $relative"
 }
@@ -44,10 +48,27 @@ foreach ($relative in @(
 Test-JsonFile (Join-Path $root 'project.json')
 Test-JsonFile (Join-Path $root 'config\config.json')
 Test-JsonFile (Join-Path $root 'config\NRSC5_HDRadio.json')
+$sourceMainConfig = Get-Content -Raw -LiteralPath (Join-Path $root 'config\config.json') | ConvertFrom-Json
+Assert-True ($sourceMainConfig.tuningAccess.mode -in @('public', 'limited', 'admin')) 'La plantilla no define un modo de acceso valido.'
+Assert-True ($sourceMainConfig.tuningAccess.maxControllers -in @(1, 2)) 'La plantilla no define un cupo valido.'
+Assert-True ($sourceMainConfig.tuningAccess.sessionMinutes -in @(30, 60)) 'La plantilla no define una caducidad valida para las reservas.'
+$tunerFixText = Get-Content -Raw -LiteralPath (Join-Path $root 'scripts\Apply-Tuner-Lock-Fix.ps1')
+$tuningAccessText = Get-Content -Raw -LiteralPath (Join-Path $root 'overlays\fm-dx-webserver\server\tuning_access.js')
+$buildPortableText = Get-Content -Raw -LiteralPath (Join-Path $root 'scripts\Build-Portable.ps1')
+Assert-True ($tunerFixText -match 'TUNER_HEARTBEAT_MS = 30000') 'Falta el heartbeat que elimina conexiones de sintonia abandonadas.'
+Assert-True ($tunerFixText -match 'setTuningMode' -and $tunerFixText -match 'tuning-access-denied') 'Faltan controles administrativos o aviso de cupo.'
+Assert-True ($tuningAccessText -match "mode === 'admin'" -and $tuningAccessText -match 'maxControllers') 'El gestor no implementa los tres modos y cupos.'
+Assert-True ($buildPortableText -match 'preservedMainConfig' -and $buildPortableText -match 'contrasenas conservadas') 'La reconstruccion no conserva las contrasenas activas.'
 
 $airspyNativeText = Get-Content -Raw -LiteralPath (Join-Path $root 'native\airspyhf_hybrid\airspyhf_hybrid.c')
-Assert-True ($airspyNativeText -match 'ANALOG_HALF_BANDWIDTH_HZ 95000\.0') 'El canal FM analogico no usa el filtro fino de 190 kHz.'
+Assert-True ($airspyNativeText -match 'CHANNEL_FILTER_STAGES 6') 'El filtro DX Airspy no usa el Butterworth de orden 12.'
+Assert-True ($airspyNativeText -match 'value == 120.*value == 140.*value == 160.*value == 190') 'Faltan perfiles DX 120/140/160/190 en el receptor nativo.'
+Assert-True ($airspyNativeText -match 'filter_reset_requested') 'Cambiar el filtro DX todavia reinicia toda la ruta de audio.'
 Assert-True ($airspyNativeText -match 'target_blend = pilot_blend \* \(0\.30 \+ 0\.70 \* snr_blend\)') 'El estereo Airspy no reduce ruido metalico cuando baja el SNR.'
+$spectrumAnalyzerText = Get-Content -Raw -LiteralPath (Join-Path $root 'overlays\fm-dx-webserver\plugins\NRSC5_HDRadio\spectrum_analyzer.js')
+Assert-True ($spectrumAnalyzerText -match 'FFT_SIZE = 2048' -and $spectrumAnalyzerText -match 'OUTPUT_BINS = 256' -and $spectrumAnalyzerText -match 'UPDATE_INTERVAL_MS = 125') 'El analizador no conserva la actualizacion fluida y limitada a 8 FPS.'
+$spectrumBridgeText = Get-Content -Raw -LiteralPath (Join-Path $root 'overlays\fm-dx-webserver\plugins\NRSC5_HDRadio\NRSC5_HDRadio_frontend_server.js')
+Assert-True ($spectrumBridgeText -match 'spectrumAnalyzer\.attach' -and $spectrumBridgeText -match 'rtlCapture\.stdio\[3\]') 'Spectrum Graph no reutiliza el flujo IQ compartido.'
 
 $manifest = Get-Content -Raw -LiteralPath (Join-Path $root 'project.json') | ConvertFrom-Json
 $repos = @{
@@ -58,6 +79,7 @@ $repos = @{
     'nrsc5-gui' = 'third_party\nrsc5-gui'
     'redsea' = 'third_party\redsea'
     'liquid-dsp' = 'third_party\liquid-dsp'
+    'SpectrumGraph' = 'third_party\SpectrumGraph'
 }
 foreach ($name in $repos.Keys) {
     $repoPath = Join-Path $root $repos[$name]
@@ -82,7 +104,7 @@ if ($DistributionPath) {
         'scripts\Configure-RemotePasswords.ps1', 'scripts\Enable-Network.ps1', 'scripts\Publish-Internet.ps1',
         'runtime\node\node.exe', 'runtime\python\python.exe',
         'app\index.js', 'app\node_modules\express',
-        'app\server\rtl_virtual_output.js', 'app\server\stream\parser.js', 'app\server\stream\index.js', 'scripts\Detect-Hardware.ps1',
+        'app\server\rtl_virtual_output.js', 'app\server\tuning_access.js', 'app\server\stream\parser.js', 'app\server\stream\index.js', 'scripts\Detect-Hardware.ps1',
         'app\plugins\NRSC5_HDRadio\libnrsc5.dll',
         'app\plugins\NRSC5_HDRadio\NRSC5_HDRadio_frontend_server.js',
         'app\plugins\NRSC5_HDRadio\rtl_hybrid.exe',
@@ -90,6 +112,11 @@ if ($DistributionPath) {
         'app\plugins\NRSC5_HDRadio\airspyhf_info.exe',
         'app\plugins\NRSC5_HDRadio\redsea.exe',
         'app\plugins\NRSC5_HDRadio\analog_rds.js',
+        'app\plugins\NRSC5_HDRadio\spectrum_analyzer.js',
+        'app\plugins\SpectrumGraph.js',
+        'app\plugins\SpectrumGraph\pluginSpectrumGraph.js',
+        'app\plugins\SpectrumGraph\pluginSpectrumGraph_server.js',
+        'licenses\SpectrumGraph-MIT.txt',
         'app\plugins\NRSC5_HDRadio\libairspyhf.dll',
         'app\plugins\NRSC5_HDRadio\hybrid_bridge.py',
         'app\plugins_configs\NRSC5_HDRadio.json'
@@ -101,6 +128,10 @@ if ($DistributionPath) {
     Test-JsonFile (Join-Path $dist 'app\plugins_configs\NRSC5_HDRadio.json')
     $distConfig = Get-Content -Raw -LiteralPath (Join-Path $dist 'app\config.json') | ConvertFrom-Json
     Assert-True ($distConfig.device -in @('sdr', 'tef')) 'El paquete no identifica un receptor compatible.'
+    Assert-True ($distConfig.plugins -contains 'SpectrumGraph/pluginSpectrumGraph.js') 'Spectrum Graph no esta habilitado en el paquete.'
+    Assert-True ($distConfig.tuningAccess.mode -in @('public', 'limited', 'admin')) 'El paquete no conserva el modo de acceso.'
+    Assert-True ($distConfig.tuningAccess.maxControllers -in @(1, 2)) 'El paquete no conserva el cupo de usuarios.'
+    Assert-True ($distConfig.tuningAccess.sessionMinutes -in @(30, 60)) 'El paquete no conserva la caducidad de sesiones de sintonia.'
     Assert-True (($distConfig.device -eq 'sdr' -and $distConfig.portableRtlMode -eq $true) -or ($distConfig.device -eq 'tef' -and $distConfig.portableRtlMode -eq $false)) 'El modo de audio no coincide con el receptor seleccionado.'
     $serverIndex = Get-Content -Raw -LiteralPath (Join-Path $dist 'app\server\index.js')
     $bridgeText = Get-Content -Raw -LiteralPath (Join-Path $dist 'app\plugins\NRSC5_HDRadio\hd_bridge.py')
@@ -111,6 +142,8 @@ if ($DistributionPath) {
     Assert-True ($dataHandlerText -match 'resetRds: rdsReset') 'El nucleo no expone el reinicio de RDS al resintonizar.'
     Assert-True ($pluginServerText -match 'rtlCapturePath') 'El plugin no conserva el respaldo RTL compartido.'
     Assert-True ($pluginServerText -match 'airspyCapturePath') 'El plugin no usa la captura Airspy HF+ compartida.'
+    Assert-True ($pluginServerText -match 'spectrumAnalyzer\.attach') 'Spectrum Graph no reutiliza el flujo IQ compartido.'
+    Assert-True ($pluginServerText -match "case 'hd-radio-bandwidth'" -and $pluginServerText -match '120, 140, 160, 190') 'El servidor no expone los cuatro filtros DX en vivo.'
     Assert-True ($pluginServerText -match 'audio_program') 'El servidor no descubre los subcanales HD recibidos.'
     Assert-True ($pluginServerText -match 'Selecting HD.*without retuning') 'Cambiar HD1/HD2/HD3 todavia resintoniza el receptor.'
     Assert-True ($pluginServerText -match 'HD re-enabled on existing receiver capture') 'HD Radio ON todavia reinicia y desconecta el receptor compartido.'
@@ -129,6 +162,13 @@ if ($DistributionPath) {
     Assert-True ($bridgeText -match 'librtlsdr\.dll') 'El enumerador Python no reconoce librtlsdr.dll.'
     Assert-True ($serverIndex -match 'rtlVirtualMode') 'El parche del nucleo RTL-SDR no se aplico al servidor.'
     Assert-True ($serverIndex -match 'allowPortableLocalTuning') 'La interfaz local no puede autorizar la sintonizacion RTL.'
+    Assert-True ($serverIndex -match 'TUNER_HEARTBEAT_MS = 30000' -and $serverIndex -match 'socket\.terminate\(\)') 'El paquete no limpia WebSockets abandonados.'
+    Assert-True ($serverIndex -match 'tuningAccess\.release\(tuningSessionKey\)') 'El cierre de sesion no libera su cupo.'
+    Assert-True ($serverIndex -match "setTuningMode\('public'\)" -and $serverIndex -match "setTuningMode\('limited'\)" -and $serverIndex -match "setTuningMode\('admin'\)") 'El administrador no controla los tres modos.'
+    $tuningRuntimeText = Get-Content -Raw -LiteralPath (Join-Path $dist 'app\server\tuning_access.js')
+    Assert-True ($tuningRuntimeText -match 'leases\.size >= limits\.maxControllers') 'El paquete no aplica el limite de 1/2 usuarios.'
+    $setupViewText = Get-Content -Raw -LiteralPath (Join-Path $dist 'app\web\setup.ejs')
+    Assert-True ($setupViewText -match 'tuningAccess-mode' -and $setupViewText -match 'tuningAccess-maxControllers' -and $setupViewText -match 'tuningAccess-sessionMinutes') 'Faltan controles de acceso en Admin Setup.'
     Assert-True ($serverIndex -match 'const ipv4Address = serverConfig\.webserver\.webserverIp;') 'El servidor IPv4 no se enlaza a todas las interfaces para la red local.'
     $passwordScript = Get-Content -Raw -LiteralPath (Join-Path $dist 'scripts\Configure-RemotePasswords.ps1')
     Assert-True ($passwordScript -match 'adminConfirm') 'El configurador no solicita confirmacion de contrasena.'
@@ -146,6 +186,7 @@ if ($DistributionPath) {
     $pluginFrontendText = Get-Content -Raw -LiteralPath (Join-Path $dist 'app\plugins\NRSC5_HDRadio\NRSC5_HDRadio_frontend.js')
     Assert-True ($pluginFrontendText -match '_broadcastArtUrl \|\| _itunesArtUrl') 'Las imagenes LOT de HD Radio no tienen prioridad sobre la portada externa.'
     Assert-True ($pluginFrontendText -match 'HD RADIO ON') 'Falta el boton para reactivar HD Radio en la misma area.'
+    Assert-True ($pluginFrontendText -match 'DX 190' -and $pluginFrontendText -match 'DX 160' -and $pluginFrontendText -match 'DX 140' -and $pluginFrontendText -match 'DX 120') 'El dashboard no muestra los cuatro perfiles de selectividad DX.'
     Assert-True ($pluginFrontendText -match 'restartFmStreamAfterTune[\s\S]{0,900}activeStream\.Start') 'La sintonia no reanuda automaticamente el audio FM.'
     Assert-True ($pluginFrontendText -match 'portable-rf-readout') 'La interfaz no muestra SNR, dBm estimado y PI juntos.'
     Assert-True ($pluginServerText -match 'rtlSnrDb' -and $pluginServerText -match 'rtlPowerDbm') 'SNR y dBm no se publican como metricas independientes.'
@@ -155,6 +196,8 @@ if ($DistributionPath) {
     Assert-True ($pluginFrontendText -match 'HD RADIO OFF') 'Falta el boton visible para forzar FM analogica en HD debil.'
         & $node --check (Join-Path $dist 'app\plugins\NRSC5_HDRadio\NRSC5_HDRadio_frontend_server.js')
         & $node --check (Join-Path $dist 'app\plugins\NRSC5_HDRadio\analog_rds.js')
+        & $node --check (Join-Path $dist 'app\plugins\NRSC5_HDRadio\spectrum_analyzer.js')
+        & $node --check (Join-Path $dist 'app\plugins\SpectrumGraph\pluginSpectrumGraph_server.js')
     Assert-True ($pluginServerText -match 'retuneLive\(newFreq') 'La sintonia cambia reiniciando el receptor en vez de usar retune en vivo.'
     Assert-True ($pluginServerText -match "stdio: \['pipe', 'pipe', 'pipe', 'pipe'\]") 'El capturador RTL no conserva un canal de control para resintonizar.'
     Assert-True ($pluginServerText -match 'publishRtlMetric') 'Las metricas SNR del RTL no se publican en la interfaz.'
@@ -172,6 +215,8 @@ if ($DistributionPath) {
     Assert-True ($pluginFrontendText -match 'b.disabled = !unlocked') 'La interfaz sigue bloqueando HD2/HD3 por metadatos tardios.'
         & $node --check (Join-Path $dist 'app\plugins\NRSC5_HDRadio\NRSC5_HDRadio_frontend_server.js')
         & $node --check (Join-Path $dist 'app\plugins\NRSC5_HDRadio\analog_rds.js')
+        & $node --check (Join-Path $dist 'app\plugins\NRSC5_HDRadio\spectrum_analyzer.js')
+        & $node --check (Join-Path $dist 'app\plugins\SpectrumGraph\pluginSpectrumGraph_server.js')
         Assert-True ($LASTEXITCODE -eq 0) 'El servidor hibrido del plugin no pasa node --check.'
         try { & $node -e "require('express'); require('serialport'); require('ws')" }
         finally { Pop-Location }

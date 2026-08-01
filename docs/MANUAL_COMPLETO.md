@@ -195,7 +195,20 @@ La casilla **Mostrar contraseñas mientras escribo** permite revisar los caracte
 
 Nunca publique el `app\config.json` de una instalacion activa. El repositorio contiene solamente plantillas con contraseñas vacias.
 
-### 9.2 Red local
+### 9.2 Bloqueo y sesiones de sintonia
+
+Desde **Admin > Setup > Quick settings** se configuran tres opciones:
+
+- **Siempre publico:** todos pueden sintonizar sin reservar cupo.
+- **Sesiones limitadas:** permite 1 o 2 usuarios controladores simultaneos durante 30 o 60 minutos.
+- **Solo administrador:** bloquea la sintonia para visitantes y usuarios normales.
+
+Los campos **Usuarios simultaneos** y **Tiempo por sesion** controlan el cupo del modo limitado. Una sesion comienza con el primer cambio de frecuencia, termina al cerrar el navegador o caduca al alcanzar su tiempo maximo. Si no quedan cupos, la interfaz muestra un aviso y no cambia la frecuencia.
+
+El servidor envia un heartbeat cada 30 segundos. Si un navegador se suspende, pierde Wi-Fi o desaparece sin cerrar correctamente, su WebSocket se termina y el cupo se libera. Los controles rapidos del icono de llave cambian entre publico y limitado; el candado selecciona solo administrador.
+
+Al reconstruir o actualizar el paquete, Build-Portable conserva la configuracion activa, las contraseñas, el receptor y estos limites. La plantilla destinada a GitHub mantiene las contraseñas vacias.
+### 9.3 Red local
 
 1. Configure ambas contraseñas.
 2. Ejecute `Habilitar-Red-Local.cmd` como administrador.
@@ -206,7 +219,7 @@ Nunca publique el `app\config.json` de una instalacion activa. El repositorio co
 
 El servidor usa `0.0.0.0` para escuchar interfaces IPv4, pero el Firewall limita el acceso a la subred local.
 
-### 9.3 Acceso desde Internet
+### 9.4 Acceso desde Internet
 
 Ejecute `Publicar-Internet.cmd`. El script descarga `cloudflared` oficial, valida SHA-256 o firma digital y muestra una URL HTTPS temporal `trycloudflare.com`. Mantenga la ventana abierta.
 

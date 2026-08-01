@@ -7,14 +7,30 @@ La configuracion predeterminada usa Airspy HF+ por USB para FM analogico y NRSC-
 - Cobertura usada: 87.5 a 108.0 MHz.
 - Flujo del dispositivo: IQ complejo float32 a 768 kS/s.
 - Flujo NRSC-5: remuestreo exacto 3969/4096 a 744187.5 sps, formato CF32.
-- Audio analogico: WBFM de 400 kHz, PCM estereo 48 kHz.
+- Audio analogico: WBFM con selectividad DX de 190/160/140/120 kHz, PCM estereo 48 kHz.
 - Control: cambio de frecuencia en vivo sin cerrar el dispositivo ni los WebSockets.
 - Biblioteca incluida: libairspyhf 1.8.1 y airspyhf_info.exe.
 
 Windows normalmente reconoce Airspy HF+ mediante su controlador USB compatible. No aplique al Airspy la configuracion Zadig destinada al RTL2832U. Cierre SDR#, SDR++ o cualquier programa que este usando el Airspy antes de iniciar FM-DX.
 
-Ejecute `Diagnostico.cmd` para ver el numero de serie, firmware, tasas disponibles y estado de acceso.
+Ejecute Diagnostico.cmd para ver el numero de serie, firmware, tasas disponibles y estado de acceso.
 
+### Spectrum Graph con Airspy HF+
+
+El grafico reutiliza las mismas muestras IQ CF32 que alimentan NRSC-5 y no intenta abrir el Airspy una segunda vez. Muestra aproximadamente 744 kHz alrededor de la frecuencia sintonizada con FFT de 2048 puntos, 256 columnas, suavizado temporal y hasta 8 actualizaciones por segundo.
+
+La integracion no recorre toda la banda ni resintoniza el receptor. Para inspeccionar otra zona, cambie la frecuencia normalmente en la interfaz; FM, RDS y HD permanecen continuos.
+
+### Filtros de selectividad FM DX
+
+El dashboard ofrece cuatro anchos para la ruta FM analogica del Airspy HF+. El cambio es inmediato y no reinicia el receptor, el audio, RDS, HD Radio ni Spectrum Graph:
+
+- `DX 190`: maxima fidelidad estereo/RDS; selectividad moderada.
+- `DX 160`: equilibrio recomendado para DX con una adyacente fuerte.
+- `DX 140`: rechazo alto de canales adyacentes.
+- `DX 120`: rechazo maximo; en emisoras con desviacion muy ancha puede reducir el estereo o RDS.
+
+Los cuatro perfiles usan un filtro Butterworth de orden 12 sin ondulacion de banda pasante. Solo filtran la demodulacion analogica; NRSC-5 y Spectrum Graph conservan el flujo IQ completo.
 ## RTL-SDR (respaldo)
 
 RTL2832U sigue disponible seleccionando `rtl` en `Configurar.cmd`. Requiere WinUSB/Zadig y no puede estar abierto simultaneamente en SDR#.
