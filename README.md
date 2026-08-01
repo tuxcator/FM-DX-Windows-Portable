@@ -42,7 +42,7 @@ El paquete se crea en `dist\FM-DX-Windows-Portable`. Dentro de esa carpeta:
 
 ## Actualizar GitHub
 
-Ejecute `Actualizar-GitHub.cmd`. El script comprueba la sesion de GitHub, valida pruebas y secretos, muestra los archivos pendientes, solicita confirmacion, crea el commit y actualiza `main` sin usar force push.
+Ejecute `Actualizar-GitHub.cmd`. El script comprueba la sesion de GitHub, valida pruebas y secretos, muestra los archivos pendientes, solicita confirmacion y publica sin usar force push. En `main` actualiza directamente; en otra rama crea o reutiliza un pull request hacia `main`.
 
 Desde PowerShell tambien puede indicar el mensaje y confirmar automaticamente:
 

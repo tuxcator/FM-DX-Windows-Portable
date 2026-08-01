@@ -1,4 +1,4 @@
-﻿param(
+param(
     [string]$Message = '',
     [switch]$Yes,
     [switch]$SkipTests,
@@ -34,15 +34,21 @@ $ghCommand = Get-Command gh -ErrorAction SilentlyContinue
 if ($ghCommand) {
     $ghPath = $ghCommand.Source
 } else {
-    $ghPath = 'C:\Program Files\GitHub CLI\gh.exe'
-    if (-not (Test-Path -LiteralPath $ghPath)) {
+    $ghCandidates = @(
+        'C:\Program Files\GitHub CLI\gh.exe',
+        'C:\Program Files (x86)\GitHub CLI\gh.exe',
+        (Join-Path $env:LOCALAPPDATA 'Programs\GitHub CLI\gh.exe'),
+        (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links\gh.exe')
+    )
+    $ghPath = $ghCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    if (-not $ghPath) {
         throw 'GitHub CLI no esta instalado. Ejecute: winget install --id GitHub.cli --exact'
     }
 }
 
 & $ghPath auth status
 if ($LASTEXITCODE -ne 0) {
-    throw 'No hay sesion de GitHub. Ejecute: gh auth login --web --git-protocol https'
+    throw ('No hay sesion de GitHub. Ejecute: "{0}" auth login --web --git-protocol https' -f $ghPath)
 }
 
 $authenticatedRepo = (& $ghPath repo view $repoName --json nameWithOwner --jq '.nameWithOwner').Trim()
@@ -51,20 +57,22 @@ if ($LASTEXITCODE -ne 0 -or $authenticatedRepo -ne $repoName) {
 }
 
 $branch = (& git -C $root branch --show-current).Trim()
-if ($branch -ne 'main') {
-    throw "Este actualizador solo publica main. Rama actual: $branch"
+if ([string]::IsNullOrWhiteSpace($branch)) {
+    throw 'No se pudo determinar la rama Git actual.'
 }
 
+Write-Host "Rama actual: $branch" -ForegroundColor DarkCyan
 Write-Host ''
-Write-Host 'Comprobando si GitHub tiene cambios mas nuevos...' -ForegroundColor Yellow
+Write-Host 'Comprobando cambios remotos...' -ForegroundColor Yellow
 Invoke-Git -GitArguments @('fetch', 'origin', 'main')
+
 $counts = (& git -C $root rev-list --left-right --count 'HEAD...origin/main').Trim() -split '\s+'
 if ($LASTEXITCODE -ne 0 -or $counts.Count -lt 2) {
-    throw 'No se pudo comparar main con origin/main.'
+    throw 'No se pudo comparar la rama actual con origin/main.'
 }
 $behind = [int]$counts[1]
-if ($behind -gt 0) {
-    throw "La copia local esta $behind commit(s) atras de GitHub. Actualice o resuelva los cambios antes de publicar."
+if ($branch -eq 'main' -and $behind -gt 0) {
+    throw "La copia local esta $behind commit(s) atras de GitHub. Ejecute git pull --ff-only antes de publicar."
 }
 
 Write-Host ''
@@ -80,21 +88,20 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $changes = @(& git -C $root status --short)
-if ($changes.Count -eq 0) {
-    Write-Host '[OK] No hay cambios pendientes; GitHub ya esta actualizado.' -ForegroundColor Green
-    exit 0
+if ($changes.Count -gt 0) {
+    Write-Host ''
+    Write-Host 'Cambios que se prepararan:' -ForegroundColor White
+    $changes | ForEach-Object { Write-Host "  $_" }
+} else {
+    Write-Host '[OK] No hay cambios nuevos para confirmar; se comprobara la rama remota.' -ForegroundColor Green
 }
-
-Write-Host ''
-Write-Host 'Cambios que se prepararan:' -ForegroundColor White
-$changes | ForEach-Object { Write-Host "  $_" }
 
 if ($DryRun) {
     Write-Host '[OK] Simulacion terminada; no se preparo, confirmo ni publico ningun archivo.' -ForegroundColor Green
     exit 0
 }
 
-if (-not $Yes) {
+if ($changes.Count -gt 0 -and -not $Yes) {
     $answer = Read-Host 'Desea validar, confirmar y publicar estos cambios? (s/N)'
     if ($answer -notmatch '^[sSyY]$') {
         Write-Host 'Operacion cancelada; no se modifico el indice Git.' -ForegroundColor Yellow
@@ -102,59 +109,74 @@ if (-not $Yes) {
     }
 }
 
-Invoke-Git -GitArguments @('add', '-A')
+if ($changes.Count -gt 0) {
+    Invoke-Git -GitArguments @('add', '-A')
 
-$staged = @(& git -C $root diff --cached --name-only --diff-filter=ACMR)
-if ($LASTEXITCODE -ne 0) {
-    throw 'No se pudo leer la lista de archivos preparados.'
-}
-if ($staged.Count -eq 0) {
-    Write-Host '[OK] No hay cambios versionables despues de aplicar .gitignore.' -ForegroundColor Green
-    exit 0
-}
+    $staged = @(& git -C $root diff --cached --name-only --diff-filter=ACMR)
+    if ($LASTEXITCODE -ne 0) {
+        throw 'No se pudo leer la lista de archivos preparados.'
+    }
+    if ($staged.Count -eq 0) {
+        Write-Host '[OK] No hay cambios versionables despues de aplicar .gitignore.' -ForegroundColor Green
+    } else {
+        $forbiddenPatterns = @(
+            '^(dist|runtime|\.cache|backups|node_modules)/',
+            '(^|/)\.env($|\.)',
+            '\.(pem|key|pfx|p12)$',
+            '(^|/)secrets\.'
+        )
+        $forbidden = @($staged | Where-Object {
+            $path = $_
+            $forbiddenPatterns | Where-Object { $path -match $_ }
+        })
+        if ($forbidden.Count -gt 0) {
+            & git -C $root restore --staged -- $forbidden
+            throw "Se bloquearon archivos privados o generados: $($forbidden -join ', ')"
+        }
 
-$forbiddenPatterns = @(
-    '^(dist|runtime|\.cache|backups|node_modules)/',
-    '(^|/)\.env($|\.)',
-    '\.(pem|key|pfx|p12)$',
-    '(^|/)secrets\.'
-)
-$forbidden = @($staged | Where-Object {
-    $path = $_
-    $forbiddenPatterns | Where-Object { $path -match $_ }
-})
-if ($forbidden.Count -gt 0) {
-    & git -C $root reset -- $forbidden
-    throw "Se bloquearon archivos privados o generados: $($forbidden -join ', ')"
-}
+        & git -C $root diff --cached --check
+        if ($LASTEXITCODE -ne 0) {
+            throw 'git diff --cached --check encontro errores; no se creo el commit.'
+        }
 
-& git -C $root diff --cached --check
-if ($LASTEXITCODE -ne 0) {
-    throw 'git diff --cached --check encontro errores; no se creo el commit.'
-}
+        if ([string]::IsNullOrWhiteSpace($Message)) {
+            $Message = Read-Host 'Mensaje del commit [Update FM-DX Windows Portable]'
+        }
+        if ([string]::IsNullOrWhiteSpace($Message)) {
+            $Message = 'Update FM-DX Windows Portable'
+        }
+        if ($Message.Length -gt 100) {
+            throw 'El mensaje del commit debe tener 100 caracteres o menos.'
+        }
 
-if ([string]::IsNullOrWhiteSpace($Message)) {
-    $Message = Read-Host 'Mensaje del commit [Fix TEF668X DirectShow audio stability]'
-}
-if ([string]::IsNullOrWhiteSpace($Message)) {
-    $Message = 'Fix TEF668X DirectShow audio stability'
-}
-if ($Message.Length -gt 100) {
-    throw 'El mensaje del commit debe tener 100 caracteres o menos.'
+        Write-Host ''
+        Write-Host "Creando commit: $Message" -ForegroundColor Yellow
+        Invoke-Git -GitArguments @('commit', '-m', $Message)
+    }
 }
 
 Write-Host ''
-Write-Host "Creando commit: $Message" -ForegroundColor Yellow
-Invoke-Git -GitArguments @('commit', '-m', $Message)
-
-Write-Host ''
-Write-Host 'Subiendo main sin force push...' -ForegroundColor Yellow
-Invoke-Git -GitArguments @('push', 'origin', 'main')
+Write-Host "Subiendo $branch sin force push..." -ForegroundColor Yellow
+Invoke-Git -GitArguments @('push', '--set-upstream', 'origin', $branch)
 
 $commit = (& git -C $root rev-parse --short HEAD).Trim()
 Write-Host ''
 Write-Host "[OK] GitHub actualizado en el commit $commit." -ForegroundColor Green
 Write-Host "Repositorio: https://github.com/$repoName"
 Write-Host "Acciones:    https://github.com/$repoName/actions"
+
+if ($branch -ne 'main') {
+    $prUrl = (& $ghPath pr list --repo $repoName --head $branch --state open --json url --jq '.[0].url').Trim()
+    if ([string]::IsNullOrWhiteSpace($prUrl)) {
+        $title = if ([string]::IsNullOrWhiteSpace($Message)) { "Actualizar $branch" } else { $Message }
+        $body = 'Actualizacion publicada con Actualizar-GitHub.cmd.' + [Environment]::NewLine + [Environment]::NewLine +
+            'Validaciones locales completadas antes de subir la rama.'
+        $prUrl = (& $ghPath pr create --repo $repoName --base main --head $branch --draft --title $title --body $body).Trim()
+        if ($LASTEXITCODE -ne 0) {
+            throw 'La rama se subio, pero no se pudo crear el pull request.'
+        }
+    }
+    Write-Host "Pull request: $prUrl" -ForegroundColor Cyan
+}
 
 & $ghPath run list --repo $repoName --limit 3
