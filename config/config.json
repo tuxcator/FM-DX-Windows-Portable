@@ -95,7 +95,8 @@
                                  }
                },
     "plugins":  [
-                    "NRSC5_HDRadio/NRSC5_HDRadio_frontend.js"
+                    "NRSC5_HDRadio/NRSC5_HDRadio_frontend.js",
+                    "SpectrumGraph/pluginSpectrumGraph.js"
                 ],
     "device":  "sdr",
     "portableRtlMode":  true,
@@ -122,5 +123,10 @@
     "stereoNoUsers":  "0",
     "antennaStartup":  "0",
     "antennaNoUsers":  "0",
-    "antennaNoUsersDelay":  false
+    "antennaNoUsersDelay":  false,
+    "tuningAccess":  {
+                          "mode":  "admin",
+                          "maxControllers":  2,
+                          "sessionMinutes":  60
+                      }
 }

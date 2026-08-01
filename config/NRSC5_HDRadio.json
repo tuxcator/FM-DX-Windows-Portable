@@ -11,5 +11,6 @@
   "autoStart": true,
   "enhancedMeta": false,
   "forceHdAudio": false,
-  "airspyDbmOffset": -10
+  "airspyDbmOffset": -10,
+  "analogBandwidthKhz": 190
 }
