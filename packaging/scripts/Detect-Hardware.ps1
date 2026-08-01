@@ -71,10 +71,16 @@ if ($selected -in @('airspyhf', 'rtl')) {
     if (-not $hd.PSObject.Properties['receiver']) { $hd | Add-Member -NotePropertyName receiver -NotePropertyValue $selected }
     else { $hd.receiver = $selected }
 } else {
+    # TEF controls tuning and supplies analog audio through DirectShow. Keep the
+    # independent SDR receiver available for simultaneous NRSC-5 HD decoding.
     $main.device = 'tef'
     if (-not $main.PSObject.Properties['portableRtlMode']) { $main | Add-Member -NotePropertyName portableRtlMode -NotePropertyValue $false }
     else { $main.portableRtlMode = $false }
-    $hd.autoStart = $false
+    $hdReceiver = if ($airspy.Present) { 'airspyhf' } elseif ($rtl.Present) { 'rtl' } else { [string]$hd.receiver }
+    if ($hdReceiver -in @('airspyhf', 'rtl')) {
+        if (-not $hd.PSObject.Properties['receiver']) { $hd | Add-Member -NotePropertyName receiver -NotePropertyValue $hdReceiver }
+        else { $hd.receiver = $hdReceiver }
+    }
 }
 foreach ($entry in @{
     mode=$mode; detected=$selected; airspyPresent=[bool]$airspy.Present;

@@ -17,12 +17,13 @@ Write-Host 'Ejecutando pruebas del proyecto...' -ForegroundColor Cyan
 
 foreach ($relative in @(
     'project.json', 'README.md', 'config\config.json', 'config\NRSC5_HDRadio.json',
-    'scripts\Build-Portable.ps1', 'scripts\Get-Runtimes.ps1', 'scripts\Get-Nrsc5.ps1', 'scripts\Build-Nrsc5.ps1',
+    'scripts\Build-Portable.ps1', 'scripts\Get-Runtimes.ps1', 'scripts\Get-Nrsc5.ps1', 'scripts\Build-Nrsc5.ps1', 'scripts\Update-GitHub.ps1', 'Actualizar-GitHub.cmd',
     'packaging\scripts\Detect-Hardware.ps1', 'packaging\scripts\Configure-RemotePasswords.ps1',
     'packaging\scripts\Enable-Network.ps1',
     'packaging\scripts\Publish-Internet.ps1', 'packaging\Configurar-Contrasenas.cmd',
     'packaging\Habilitar-Red-Local.cmd',
     'packaging\Publicar-Internet.cmd', 'overlays\fm-dx-webserver\server\rtl_virtual_output.js',
+    'overlays\fm-dx-webserver\server\stream\parser.js', 'overlays\fm-dx-webserver\server\stream\index.js',
     'overlays\fm-dx-webserver\plugins\NRSC5_HDRadio\hybrid_bridge.py',
     'overlays\fm-dx-webserver\plugins\NRSC5_HDRadio\analog_rds.js',
     'overlays\fm-dx-webserver\plugins\NRSC5_HDRadio\NRSC5_HDRadio_frontend_server.js',
@@ -81,7 +82,7 @@ if ($DistributionPath) {
         'scripts\Configure-RemotePasswords.ps1', 'scripts\Enable-Network.ps1', 'scripts\Publish-Internet.ps1',
         'runtime\node\node.exe', 'runtime\python\python.exe',
         'app\index.js', 'app\node_modules\express',
-        'app\server\rtl_virtual_output.js', 'scripts\Detect-Hardware.ps1',
+        'app\server\rtl_virtual_output.js', 'app\server\stream\parser.js', 'app\server\stream\index.js', 'scripts\Detect-Hardware.ps1',
         'app\plugins\NRSC5_HDRadio\libnrsc5.dll',
         'app\plugins\NRSC5_HDRadio\NRSC5_HDRadio_frontend_server.js',
         'app\plugins\NRSC5_HDRadio\rtl_hybrid.exe',
@@ -99,11 +100,12 @@ if ($DistributionPath) {
     Test-JsonFile (Join-Path $dist 'app\config.json')
     Test-JsonFile (Join-Path $dist 'app\plugins_configs\NRSC5_HDRadio.json')
     $distConfig = Get-Content -Raw -LiteralPath (Join-Path $dist 'app\config.json') | ConvertFrom-Json
-    Assert-True ($distConfig.device -eq 'sdr') 'El paquete no identifica el receptor principal como SDR.'
-    Assert-True ($distConfig.portableRtlMode -eq $true) 'El modo virtual RTL-SDR no esta activo.'
+    Assert-True ($distConfig.device -in @('sdr', 'tef')) 'El paquete no identifica un receptor compatible.'
+    Assert-True (($distConfig.device -eq 'sdr' -and $distConfig.portableRtlMode -eq $true) -or ($distConfig.device -eq 'tef' -and $distConfig.portableRtlMode -eq $false)) 'El modo de audio no coincide con el receptor seleccionado.'
     $serverIndex = Get-Content -Raw -LiteralPath (Join-Path $dist 'app\server\index.js')
     $bridgeText = Get-Content -Raw -LiteralPath (Join-Path $dist 'app\plugins\NRSC5_HDRadio\hd_bridge.py')
     $streamText = Get-Content -Raw -LiteralPath (Join-Path $dist 'app\server\stream\index.js')
+    $endpointsText = Get-Content -Raw -LiteralPath (Join-Path $dist 'app\server\endpoints.js')
     $pluginServerText = Get-Content -Raw -LiteralPath (Join-Path $dist 'app\plugins\NRSC5_HDRadio\NRSC5_HDRadio_frontend_server.js')
     $dataHandlerText = Get-Content -Raw -LiteralPath (Join-Path $dist 'app\server\datahandler.js')
     Assert-True ($dataHandlerText -match 'resetRds: rdsReset') 'El nucleo no expone el reinicio de RDS al resintonizar.'
@@ -118,6 +120,12 @@ if ($DistributionPath) {
     Assert-True ($pluginServerText -notmatch "case 'mer':[\s\S]{0,180}metadata\.signalDetected = true") 'Un valor MER todavia clasifica falsamente una emisora analogica como HD.'
     Assert-True ($pluginServerText -match 'restartAnalogRds\(rtlCapture\)') 'La resintonia no reinicia Redsea ni limpia el RDS anterior.'
     Assert-True ($streamText -match 'anullsrc=r=48000') 'El modo RTL no contiene la reserva de audio base.'
+    Assert-True ($endpointsText -notmatch 'videoDevices: result\.audioDevices|audioDevices: result\.videoDevices') 'La interfaz web intercambia las entradas de audio y video.'
+    Assert-True ($streamText -match "rtbufsize', '64M") 'TEF conserva un bufer DirectShow demasiado pequeno.'
+    Assert-True ($streamText -match 'aresample=async=1') 'TEF no corrige deriva ni huecos de la tarjeta de sonido.'
+    Assert-True ($streamText -match 'receivedAudio') 'El error de audio no distingue una captura que ya entrega datos.'
+    $parserText = Get-Content -Raw -LiteralPath (Join-Path $dist 'app\server\stream\parser.js')
+    Assert-True ($parserText -match '\(audio\|video\)') 'El enumerador no reconoce el formato DirectShow actual.'
     Assert-True ($bridgeText -match 'librtlsdr\.dll') 'El enumerador Python no reconoce librtlsdr.dll.'
     Assert-True ($serverIndex -match 'rtlVirtualMode') 'El parche del nucleo RTL-SDR no se aplico al servidor.'
     Assert-True ($serverIndex -match 'allowPortableLocalTuning') 'La interfaz local no puede autorizar la sintonizacion RTL.'
@@ -151,6 +159,8 @@ if ($DistributionPath) {
     Assert-True ($pluginServerText -match "stdio: \['pipe', 'pipe', 'pipe', 'pipe'\]") 'El capturador RTL no conserva un canal de control para resintonizar.'
     Assert-True ($pluginServerText -match 'publishRtlMetric') 'Las metricas SNR del RTL no se publican en la interfaz.'
         Assert-True ($LASTEXITCODE -eq 0) 'El servidor JavaScript del plugin no pasa node --check.'
+        & $node --check (Join-Path $dist 'app\server\stream\parser.js')
+        & $node --check (Join-Path $dist 'app\server\stream\index.js')
         & $node --check (Join-Path $dist 'app\server\rtl_virtual_output.js')
         Assert-True ($LASTEXITCODE -eq 0) 'El adaptador virtual RTL-SDR no pasa node --check.'
     Assert-True ($mainUiText -match 'TIMEOUT_DURATION = 15000') 'La interfaz conserva el umbral WebSocket inestable de cinco segundos.'

@@ -37,6 +37,17 @@ El paquete se crea en `dist\FM-DX-Windows-Portable`. Dentro de esa carpeta:
 - [Hardware](docs/HARDWARE.md)
 - [Avisos de terceros](THIRD_PARTY_NOTICES.md)
 
+## Actualizar GitHub
+
+Ejecute `Actualizar-GitHub.cmd`. El script comprueba la sesion de GitHub, valida pruebas y secretos, muestra los archivos pendientes, solicita confirmacion, crea el commit y actualiza `main` sin usar force push.
+
+Desde PowerShell tambien puede indicar el mensaje y confirmar automaticamente:
+
+```powershell
+.\scripts\Update-GitHub.ps1 -Message "Descripcion breve del cambio" -Yes
+# Simular sin crear commit ni subir:
+.\scripts\Update-GitHub.ps1 -DryRun
+```
 ## Publicacion en GitHub
 
 No suba `runtime/`, `.cache/`, `dist/`, `node_modules/`, `backups/` ni configuraciones activas. El workflow de GitHub Actions descarga y compila todas las dependencias, crea un ZIP portable y publica ZIP + SHA-256 al crear una etiqueta `v*`.

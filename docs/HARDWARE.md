@@ -21,7 +21,11 @@ RTL2832U sigue disponible seleccionando `rtl` en `Configurar.cmd`. Requiere WinU
 
 ## TEF668x / tarjeta de sonido
 
-El modo TEF/XDR permanece disponible, pero no se selecciona automaticamente mientras Airspy HF+ este configurado como receptor principal.
+El modo TEF/XDR usa el TEF para control de sintonia y FM analogica mediante una entrada DirectShow. Airspy HF+ o RTL-SDR pueden permanecer como receptor independiente para NRSC-5 HD Radio; un fallo de la tarjeta de sonido no debe reiniciar ni silenciar esa ruta HD.
+
+Ejecute `Configurar.cmd` con la tarjeta conectada y seleccione el nombre exacto mostrado por Windows. Si la entrada queda vacia o desaparece, el servidor usa silencio interno y muestra una advertencia sin iniciar un ciclo de errores. `Diagnostico.cmd` enumera las entradas reales y comprueba si la seleccion guardada sigue disponible.
+
+La captura TEF usa un bufer DirectShow amplio y resincronizacion de muestras a 48 kHz para absorber variaciones de reloj y evitar audio entrecortado. No seleccione el microfono integrado salvo que la salida del TEF este conectada fisicamente a esa entrada.
 ## FM estereo y RDS analogico
 
 Airspy HF+ entrega una unica captura compartida. El capturador demodula L+R, bloquea el piloto de 19 kHz, recupera L-R a 38 kHz y produce PCM estereo a 48 kHz. En paralelo entrega el multiplex a 192 kHz a Redsea para decodificar PI, PS y RadioText RDS sin abrir el SDR por segunda vez.

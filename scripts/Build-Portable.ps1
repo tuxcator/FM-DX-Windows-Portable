@@ -50,6 +50,15 @@ $lanBindOld = "const ipv4Address = serverConfig.webserver.webserverIp === '0.0.0
 if (-not $serverIndexText.Contains($lanBindOld)) { throw 'No se encontro el enlace IPv4 esperado del servidor.' }
 $serverIndexText = $serverIndexText.Replace($lanBindOld, 'const ipv4Address = serverConfig.webserver.webserverIp;')
 [System.IO.File]::WriteAllText($serverIndexPath, $serverIndexText, [System.Text.UTF8Encoding]::new($false))
+$endpointsPath = Join-Path $appDir 'server\endpoints.js'
+$endpointsText = [System.IO.File]::ReadAllText($endpointsPath)
+if (($endpointsText.Split('videoDevices: result.audioDevices').Count - 1) -lt 1 -or ($endpointsText.Split('audioDevices: result.videoDevices').Count - 1) -lt 1) {
+    throw 'No se encontro el intercambio heredado de dispositivos en endpoints.js.'
+}
+$endpointsText = $endpointsText.Replace('videoDevices: result.audioDevices', 'videoDevices: __FMDX_VIDEO_DEVICES__')
+$endpointsText = $endpointsText.Replace('audioDevices: result.videoDevices', 'audioDevices: result.audioDevices')
+$endpointsText = $endpointsText.Replace('videoDevices: __FMDX_VIDEO_DEVICES__', 'videoDevices: result.videoDevices')
+[System.IO.File]::WriteAllText($endpointsPath, $endpointsText, [System.Text.UTF8Encoding]::new($false))
 $rtlPatch = Join-Path $root 'patches\fm-dx-webserver-rtl.patch'
 $gitCommand = (Get-Command git -ErrorAction Stop).Source
 $gitInstall = Split-Path -Parent (Split-Path -Parent $gitCommand)
@@ -78,6 +87,9 @@ $dataHandlerText = [regex]::Replace($dataHandlerText, $piPattern, $piReplacement
 [System.IO.File]::WriteAllText($dataHandlerPath, $dataHandlerText, [System.Text.UTF8Encoding]::new($false))
 
 Copy-Item -LiteralPath (Join-Path $root 'overlays\fm-dx-webserver\server\rtl_virtual_output.js') -Destination (Join-Path $appDir 'server\rtl_virtual_output.js') -Force
+$streamDir = Join-Path $appDir 'server\stream'
+Copy-Item -LiteralPath (Join-Path $root 'overlays\fm-dx-webserver\server\stream\parser.js') -Destination (Join-Path $streamDir 'parser.js') -Force
+Copy-Item -LiteralPath (Join-Path $root 'overlays\fm-dx-webserver\server\stream\index.js') -Destination (Join-Path $streamDir 'index.js') -Force
 
 $pluginDir = Join-Path $appDir 'plugins\NRSC5_HDRadio'
 New-Item -ItemType Directory -Path $pluginDir -Force | Out-Null

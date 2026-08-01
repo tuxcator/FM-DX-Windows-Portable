@@ -35,14 +35,22 @@ Check 'Biblioteca NRSC-5' {
 }
 Write-Host 'Comprobando entradas de audio DirectShow...'
 $audioOutput = & $node (Join-Path $app 'list-audio-devices.js') 2>&1
-if ($LASTEXITCODE -eq 0) {
-    Write-Host '[OK] Entradas de audio DirectShow' -ForegroundColor Green
-    if ($audioOutput) { Write-Host "     $audioOutput" }
+try { $audioDevices = @($audioOutput | ConvertFrom-Json) } catch { $audioDevices = @() }
+$config = Get-Content -Raw (Join-Path $app 'config.json') | ConvertFrom-Json
+$configuredAudio = [string]$config.audio.audioDevice
+if ($LASTEXITCODE -eq 0 -and $audioDevices.Count -gt 0) {
+    Write-Host '[OK] Entradas de audio DirectShow detectadas:' -ForegroundColor Green
+    $audioDevices | ForEach-Object { Write-Host "     $($_.name)" }
+    if ($config.device -eq 'tef' -and [string]::IsNullOrWhiteSpace($configuredAudio)) {
+        Write-Host '[WARN] TEF esta activo, pero no tiene entrada de audio seleccionada. Ejecute Configurar.cmd.' -ForegroundColor Yellow
+    } elseif ($config.device -eq 'tef' -and $configuredAudio -notin @($audioDevices.name)) {
+        Write-Host "[WARN] La entrada configurada no esta disponible: $configuredAudio" -ForegroundColor Yellow
+        Write-Host '       Conecte la tarjeta externa y ejecute Configurar.cmd.' -ForegroundColor DarkYellow
+    }
 } else {
-    Write-Host '[WARN] No se pudieron enumerar entradas de audio en este entorno.' -ForegroundColor Yellow
-    Write-Host '       Use Configurar.cmd en una sesion normal de Windows.' -ForegroundColor DarkYellow
+    Write-Host '[WARN] Windows/FFmpeg no detecto ninguna entrada DirectShow.' -ForegroundColor Yellow
+    Write-Host '       Conecte la tarjeta de sonido del TEF y ejecute Configurar.cmd.' -ForegroundColor DarkYellow
 }
-
 Write-Host ''
 Write-Host 'Comprobando Airspy HF+ mediante libairspyhf...' -ForegroundColor Yellow
 if ($hardware.AirspyPresent -and $hardware.AirspyAccessible) {
