@@ -95,7 +95,9 @@
                                  }
                },
     "plugins":  [
-                    "NRSC5_HDRadio/NRSC5_HDRadio_frontend.js"
+                    "NRSC5_HDRadio/NRSC5_HDRadio_frontend.js",
+                    "SpectrumGraph/pluginSpectrumGraph.js",
+                    "TimeDisplay/timedisplay.js"
                 ],
     "device":  "sdr",
     "portableRtlMode":  true,
@@ -107,7 +109,7 @@
                              "airspyAccessible":  false
                          },
     "defaultFreq":  "103.7",
-    "publicTuner":  false,
+    "publicTuner":  true,
     "lockToAdmin":  false,
     "autoShutdown":  false,
     "enableDefaultFreq":  true,
@@ -122,5 +124,9 @@
     "stereoNoUsers":  "0",
     "antennaStartup":  "0",
     "antennaNoUsers":  "0",
-    "antennaNoUsersDelay":  false
+    "antennaNoUsersDelay":  false,
+    "tuningAccess":  {
+                         "maxControllers":  2,
+                         "sessionMinutes":  60
+                     }
 }

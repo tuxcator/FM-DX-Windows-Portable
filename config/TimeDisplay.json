@@ -1,0 +1,11 @@
+{
+  "provider": "open-meteo",
+  "locationName": "Monterrey, M\u00e9xico",
+  "latitude": 25.6866,
+  "longitude": -100.3161,
+  "units": "metric",
+  "apiKeys": {
+    "weather-company": "",
+    "openweathermap": ""
+  }
+}

@@ -16,7 +16,7 @@ if ([string]::IsNullOrWhiteSpace([string]$config.password.adminPass) -or [string
     if ($LASTEXITCODE -ne 0) { Write-Host 'Publicación cancelada.' -ForegroundColor Yellow; exit 1 }
     $config = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
 }
-$config.publicTuner = $false
+$config.publicTuner = $true
 [IO.File]::WriteAllText($configPath, ($config | ConvertTo-Json -Depth 100), [Text.UTF8Encoding]::new($false))
 
 if (-not (Test-Path -LiteralPath $cloudflared)) {

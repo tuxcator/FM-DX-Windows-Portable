@@ -14,6 +14,11 @@ La configuracion predeterminada usa Airspy HF+ por USB para FM analogico y NRSC-
 Windows normalmente reconoce Airspy HF+ mediante su controlador USB compatible. No aplique al Airspy la configuracion Zadig destinada al RTL2832U. Cierre SDR#, SDR++ o cualquier programa que este usando el Airspy antes de iniciar FM-DX.
 
 Ejecute `Diagnostico.cmd` para ver el numero de serie, firmware, tasas disponibles y estado de acceso.
+### Spectrum Graph con Airspy HF+
+
+El grÃ¡fico usa las mismas muestras IQ CF32 que alimentan NRSC-5; no intenta abrir el Airspy una segunda vez. Presenta aproximadamente 744 kHz alrededor de la frecuencia sintonizada y se actualiza en vivo. Pulse el control de escaneo del plugin para solicitar una instantÃ¡nea inmediata.
+
+Airspy HF+ no puede observar simultÃ¡neamente los 20.5 MHz de toda la banda FM porque su ancho instantÃ¡neo es menor. Esta integraciÃ³n prioriza la continuidad: no recorre 87.5-108 MHz ni interrumpe FM, RDS o HD. Para inspeccionar otra zona, cambie la frecuencia normalmente en la interfaz.
 
 ## RTL-SDR (respaldo)
 

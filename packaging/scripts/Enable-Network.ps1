@@ -25,7 +25,7 @@ if ([string]::IsNullOrWhiteSpace([string]$config.password.adminPass) -or [string
     $config = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
 }
 $config.webserver.webserverIp = '0.0.0.0'
-$config.publicTuner = $false
+$config.publicTuner = $true
 [IO.File]::WriteAllText($configPath, ($config | ConvertTo-Json -Depth 100), [Text.UTF8Encoding]::new($false))
 
 Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue | Remove-NetFirewallRule

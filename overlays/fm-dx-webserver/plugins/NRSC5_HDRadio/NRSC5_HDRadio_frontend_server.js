@@ -15,6 +15,7 @@ const https   = require('https');
 const http    = require('http');
 const { spawn } = require('child_process');
 const WebSocket = require('ws');
+const spectrumAnalyzer = require('./spectrum_analyzer');
 
 // ── HD Radio station directory ─────────────────────────────────────────────────
 const HD_DIR_URL   = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSsAfMH7UC0gdFImE4Iz1ZRpDzdMF82_o6J3Jl5BIKyJHFz6ujiFDOW-HUYJDt4xb5tEHPoz4irCqhd/pub?gid=884934860&single=true&output=csv';
@@ -142,7 +143,8 @@ const DEFAULT_CONFIG = {
     autoStart:    true,
     enhancedMeta:   false,
     forceHdAudio:   false,
-    airspyDbmOffset: -10
+    airspyDbmOffset: -10,
+    analogBandwidthKhz: 190
 };
 
 let pluginConfig = { ...DEFAULT_CONFIG };
@@ -275,6 +277,7 @@ function loadConfig() {
             hdLogInfo(`Created default config`);
         }
         pluginConfig = { ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(configFilePath, 'utf8')) };
+        if (![140, 160, 190].includes(Number(pluginConfig.analogBandwidthKhz))) pluginConfig.analogBandwidthKhz = 190;
         hdLogInfo(`Config loaded — device:${pluginConfig.deviceIndex} gain:${pluginConfig.autoGain ? 'auto' : pluginConfig.gain}dB`);
     } catch (e) {
         hdLogError(`Config error: ${e.message}`);
@@ -316,6 +319,8 @@ function broadcastMeta() {
         autoGain:     pluginConfig.autoGain,
         enhancedMeta:  pluginConfig.enhancedMeta,
         forceHdAudio:  pluginConfig.forceHdAudio,
+        receiver:       pluginConfig.receiver || 'rtl',
+        analogBandwidthKhz: pluginConfig.analogBandwidthKhz,
         stationName:  metadata.stationName,
         slogan:       metadata.slogan,
         message:      metadata.message,
@@ -630,7 +635,7 @@ function startBridge(freq, program) {
     const args = ['-u', hybridBridgePath, pluginConfig.nrsc5PyDir,
         String(freq), String(program), gainArg, iqFormat];
     const captureArgs = receiver === 'airspyhf'
-        ? [String(Math.round(freq * 1000000)), String(pluginConfig.airspySerial || 'auto'), String(pluginConfig.airspyAttenuation || 0)]
+        ? [String(Math.round(freq * 1000000)), String(pluginConfig.airspySerial || 'auto'), String(pluginConfig.airspyAttenuation || 0), String(pluginConfig.analogBandwidthKhz || 190)]
         : [String(Math.round(freq * 1000000)), String(pluginConfig.deviceIndex), gainArg, String(pluginConfig.ppm)];
 
     hdLogInfo(`Spawning bridge: ${pluginConfig.python3} ${args.join(' ')}`);
@@ -643,6 +648,11 @@ function startBridge(freq, program) {
     }
     try {
         rtlCapture = spawn(capturePath, captureArgs, { stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'pipe'] });
+        spectrumAnalyzer.attach(rtlCapture.stdio[3], {
+            format: iqFormat,
+            sampleRate: 744187.5,
+            getCenterMHz: () => currentFreq
+        });
         rtlCapture.stdio[3].pipe(bridge.stdin);
         if (receiver === 'airspyhf') rdsDecoder = startAnalogRds({
             capture: rtlCapture,
@@ -753,6 +763,7 @@ function stopBridge() {
     bridge = null;
     rtlCapture = null;
     rdsDecoder = null;
+    spectrumAnalyzer.detach();
     if (oldBridge) {
         try {
             if (oldBridge.stdio[3] && !oldBridge.stdio[3].destroyed)
@@ -865,6 +876,22 @@ function connectToPlugins() {
                     break;
                 }
 
+                case 'hd-radio-bandwidth': {
+                    const bandwidth = Number(msg.value?.bandwidthKhz);
+                    if (pluginConfig.receiver !== 'airspyhf' || ![140, 160, 190].includes(bandwidth)) {
+                        hdLogWarn(`Ignored invalid analog bandwidth request: ${bandwidth}`);
+                        broadcastMeta();
+                        break;
+                    }
+                    pluginConfig.analogBandwidthKhz = bandwidth;
+                    saveConfigField('analogBandwidthKhz', bandwidth);
+                    if (rtlCapture?.stdin && !rtlCapture.stdin.destroyed) {
+                        rtlCapture.stdin.write(`B${bandwidth}\n`);
+                    }
+                    hdLogInfo(`Analog FM filter -> ${bandwidth} kHz (live, HD IQ unchanged)`);
+                    broadcastMeta();
+                    break;
+                }
                 case 'hd-radio-gain': {
                     const g = Math.max(0, Math.min(60, parseFloat(msg.value?.gain) || 0));
                     pluginConfig.gain = g;

@@ -16,17 +16,21 @@ function Test-JsonFile([string]$Path) {
 Write-Host 'Ejecutando pruebas del proyecto...' -ForegroundColor Cyan
 
 foreach ($relative in @(
-    'project.json', 'README.md', 'config\config.json', 'config\NRSC5_HDRadio.json',
-    'scripts\Build-Portable.ps1', 'scripts\Get-Runtimes.ps1', 'scripts\Get-Nrsc5.ps1', 'scripts\Build-Nrsc5.ps1', 'scripts\Update-GitHub.ps1', 'Actualizar-GitHub.cmd',
+    'project.json', 'README.md', 'CHANGELOG.md', 'docs\ACTUALIZACION_DESDE_GITHUB.md', 'config\config.json', 'config\NRSC5_HDRadio.json', 'config\TimeDisplay.json',
+    'scripts\Build-Portable.ps1', 'scripts\Get-Runtimes.ps1', 'scripts\Get-Nrsc5.ps1', 'scripts\Build-Nrsc5.ps1', 'scripts\Update-GitHub.ps1', 'scripts\Update-From-GitHub.ps1', 'Actualizar-GitHub.cmd', 'Actualizar-Desde-GitHub.cmd',
     'packaging\scripts\Detect-Hardware.ps1', 'packaging\scripts\Configure-RemotePasswords.ps1',
     'packaging\scripts\Enable-Network.ps1',
     'packaging\scripts\Publish-Internet.ps1', 'packaging\Configurar-Contrasenas.cmd',
     'packaging\Habilitar-Red-Local.cmd',
-    'packaging\Publicar-Internet.cmd', 'overlays\fm-dx-webserver\server\rtl_virtual_output.js',
+    'packaging\Publicar-Internet.cmd', 'overlays\fm-dx-webserver\server\rtl_virtual_output.js', 'overlays\fm-dx-webserver\server\tuning_access.js',
     'overlays\fm-dx-webserver\server\stream\parser.js', 'overlays\fm-dx-webserver\server\stream\index.js',
     'overlays\fm-dx-webserver\plugins\NRSC5_HDRadio\hybrid_bridge.py',
     'overlays\fm-dx-webserver\plugins\NRSC5_HDRadio\analog_rds.js',
     'overlays\fm-dx-webserver\plugins\NRSC5_HDRadio\NRSC5_HDRadio_frontend_server.js',
+    'overlays\fm-dx-webserver\plugins\NRSC5_HDRadio\spectrum_analyzer.js',
+    'overlays\fm-dx-webserver\plugins\SpectrumGraph.js',
+    'overlays\fm-dx-webserver\plugins\SpectrumGraph\pluginSpectrumGraph_server.js',
+    'overlays\fm-dx-webserver\plugins\TimeDisplayPlugin.js', 'overlays\fm-dx-webserver\plugins\TimeDisplay\timedisplay.js', 'overlays\fm-dx-webserver\plugins\TimeDisplay\timedisplay_server.js',
     'overlays\fm-dx-webserver\plugins\NRSC5_HDRadio\NRSC5_HDRadio_frontend.js',
     'native\rtl_hybrid\rtl_hybrid.c', 'native\airspyhf_hybrid\airspyhf_hybrid.c',
     'patches\fm-dx-webserver-rtl.patch', 'patches\nrsc5-plugin-hybrid.patch', 'patches\nrsc5-python-cf32.patch',
@@ -36,7 +40,9 @@ foreach ($relative in @(
     'patches\nrsc5-subchannels.patch',
     'third_party\fm-dx-webserver\package-lock.json',
     'third_party\NRSC5_HDRadio\NRSC5_HDRadio\hd_bridge.py',
-    'third_party\nrsc5\CMakeLists.txt', 'third_party\nrsc5-gui\nrsc5_gui.py'
+    'third_party\nrsc5\CMakeLists.txt', 'third_party\nrsc5-gui\nrsc5_gui.py',
+    'third_party\SpectrumGraph\SpectrumGraph.js', 'third_party\SpectrumGraph\SpectrumGraph\pluginSpectrumGraph.js',
+    'third_party\webserver-time\TimeDisplayPlugin.js', 'third_party\webserver-time\TimeDisplay\timedisplay.js', 'third_party\webserver-time\LICENSE'
 )) {
     Assert-True (Test-Path -LiteralPath (Join-Path $root $relative)) "Falta $relative"
 }
@@ -44,10 +50,22 @@ foreach ($relative in @(
 Test-JsonFile (Join-Path $root 'project.json')
 Test-JsonFile (Join-Path $root 'config\config.json')
 Test-JsonFile (Join-Path $root 'config\NRSC5_HDRadio.json')
+Test-JsonFile (Join-Path $root 'config\TimeDisplay.json')
 
 $airspyNativeText = Get-Content -Raw -LiteralPath (Join-Path $root 'native\airspyhf_hybrid\airspyhf_hybrid.c')
-Assert-True ($airspyNativeText -match 'ANALOG_HALF_BANDWIDTH_HZ 95000\.0') 'El canal FM analogico no usa el filtro fino de 190 kHz.'
+Assert-True ($airspyNativeText -match 'ANALOG_DEFAULT_BANDWIDTH_KHZ 190') 'El modo normal Airspy no conserva 190 kHz.'
+Assert-True ($airspyNativeText -match "line\[0\] == 'B'" -and $airspyNativeText -match 'value == 140 \|\| value == 160 \|\| value == 190') 'Airspy no permite cambiar el filtro analogico en vivo.'
 Assert-True ($airspyNativeText -match 'target_blend = pilot_blend \* \(0\.30 \+ 0\.70 \* snr_blend\)') 'El estereo Airspy no reduce ruido metalico cuando baja el SNR.'
+$timeDisplayOverlayText = Get-Content -Raw -LiteralPath (Join-Path $root 'overlays\fm-dx-webserver\plugins\TimeDisplay\timedisplay.js')
+Assert-True ($timeDisplayOverlayText -match 'weather-date-time-content' -and $timeDisplayOverlayText -match 'time-display/weather/config') 'El indicador compacto no integra clima, fecha, hora y configuracion.'
+$timeDisplayServerText = Get-Content -Raw -LiteralPath (Join-Path $root 'overlays\fm-dx-webserver\plugins\TimeDisplay\timedisplay_server.js')
+Assert-True ($timeDisplayServerText -match 'api\.open-meteo\.com' -and $timeDisplayServerText -match 'api\.weather\.com' -and $timeDisplayServerText -match 'api\.openweathermap\.org') 'El servidor meteorologico no incluye los tres proveedores.'
+Assert-True ($timeDisplayServerText -match "req\.session\?\.isAdminAuthenticated" -and $timeDisplayServerText -match 'apiKeyConfigured') 'La configuracion meteorologica no protege las claves API.'
+$buildScriptText = Get-Content -Raw -LiteralPath (Join-Path $root 'scripts\Build-Portable.ps1')
+Assert-True ($buildScriptText -match 'sourceTimeOverlay') 'El paquete no usa la personalizacion de clima y hora.'
+$cloudUpdaterText = Get-Content -Raw -LiteralPath (Join-Path $root 'scripts\Update-From-GitHub.ps1')
+Assert-True ($cloudUpdaterText -match 'status.*--porcelain' -and $cloudUpdaterText -match 'pull.*--ff-only' -and $cloudUpdaterText -match 'submodule.*--init.*--recursive') 'El actualizador desde GitHub no protege cambios locales o submodulos.'
+
 
 $manifest = Get-Content -Raw -LiteralPath (Join-Path $root 'project.json') | ConvertFrom-Json
 $repos = @{
@@ -58,6 +76,8 @@ $repos = @{
     'nrsc5-gui' = 'third_party\nrsc5-gui'
     'redsea' = 'third_party\redsea'
     'liquid-dsp' = 'third_party\liquid-dsp'
+    'SpectrumGraph' = 'third_party\SpectrumGraph'
+    'webserver-time' = 'third_party\webserver-time'
 }
 foreach ($name in $repos.Keys) {
     $repoPath = Join-Path $root $repos[$name]
@@ -77,12 +97,13 @@ if ($pythonCommand) {
 if ($DistributionPath) {
     $dist = [System.IO.Path]::GetFullPath($DistributionPath)
     foreach ($relative in @(
+        'LEEME.md', 'CHANGELOG.md', 'ACTUALIZACION_DESDE_GITHUB.md',
         'Iniciar.cmd', 'Configurar.cmd', 'Diagnostico.cmd',
         'Configurar-Contrasenas.cmd', 'Habilitar-Red-Local.cmd', 'Publicar-Internet.cmd',
         'scripts\Configure-RemotePasswords.ps1', 'scripts\Enable-Network.ps1', 'scripts\Publish-Internet.ps1',
         'runtime\node\node.exe', 'runtime\python\python.exe',
         'app\index.js', 'app\node_modules\express',
-        'app\server\rtl_virtual_output.js', 'app\server\stream\parser.js', 'app\server\stream\index.js', 'scripts\Detect-Hardware.ps1',
+        'app\server\rtl_virtual_output.js', 'app\server\tuning_access.js', 'app\server\stream\parser.js', 'app\server\stream\index.js', 'scripts\Detect-Hardware.ps1',
         'app\plugins\NRSC5_HDRadio\libnrsc5.dll',
         'app\plugins\NRSC5_HDRadio\NRSC5_HDRadio_frontend_server.js',
         'app\plugins\NRSC5_HDRadio\rtl_hybrid.exe',
@@ -90,17 +111,40 @@ if ($DistributionPath) {
         'app\plugins\NRSC5_HDRadio\airspyhf_info.exe',
         'app\plugins\NRSC5_HDRadio\redsea.exe',
         'app\plugins\NRSC5_HDRadio\analog_rds.js',
+        'app\plugins\NRSC5_HDRadio\spectrum_analyzer.js',
+        'app\plugins\SpectrumGraph.js',
+        'app\plugins\SpectrumGraph\pluginSpectrumGraph.js',
+        'app\plugins\SpectrumGraph\pluginSpectrumGraph_server.js',
+        'app\plugins\TimeDisplayPlugin.js',
+        'app\plugins\TimeDisplay\timedisplay.js',
+        'app\plugins\TimeDisplay\timedisplay_server.js',
         'app\plugins\NRSC5_HDRadio\libairspyhf.dll',
         'app\plugins\NRSC5_HDRadio\hybrid_bridge.py',
-        'app\plugins_configs\NRSC5_HDRadio.json'
+        'app\plugins_configs\NRSC5_HDRadio.json',
+        'app\plugins_configs\TimeDisplay.json',
+        'licenses\SpectrumGraph-MIT.txt',
+        'licenses\webserver-time-GPL-3.0.txt'
     )) {
         Assert-True (Test-Path -LiteralPath (Join-Path $dist $relative)) "Paquete incompleto: $relative"
     }
 
     Test-JsonFile (Join-Path $dist 'app\config.json')
     Test-JsonFile (Join-Path $dist 'app\plugins_configs\NRSC5_HDRadio.json')
+    Test-JsonFile (Join-Path $dist 'app\plugins_configs\TimeDisplay.json')
     $distConfig = Get-Content -Raw -LiteralPath (Join-Path $dist 'app\config.json') | ConvertFrom-Json
     Assert-True ($distConfig.device -in @('sdr', 'tef')) 'El paquete no identifica un receptor compatible.'
+    Assert-True ($distConfig.plugins -contains 'SpectrumGraph/pluginSpectrumGraph.js') 'Spectrum Graph no esta habilitado en el paquete.'
+    Assert-True ($distConfig.plugins -contains 'TimeDisplay/timedisplay.js') 'Time Display no esta habilitado en el paquete.'
+    Assert-True ($distConfig.publicTuner -eq $true -and $distConfig.lockToAdmin -eq $false) 'La sintonia publica no queda desbloqueada.'
+    Assert-True ($distConfig.tuningAccess.maxControllers -in @(1, 2)) 'El limite de usuarios no es valido.'
+    Assert-True ($distConfig.tuningAccess.sessionMinutes -in @(30, 60)) 'La duracion de sesion no es valida.'
+    $spectrumFrontendText = Get-Content -Raw -LiteralPath (Join-Path $dist 'app\plugins\SpectrumGraph\pluginSpectrumGraph.js')
+    Assert-True ($spectrumFrontendText -match '^\(\(\) => \{') 'El frontend Spectrum Graph no esta aislado de los demas plugins.'
+    $timeDisplayText = Get-Content -Raw -LiteralPath (Join-Path $dist 'app\plugins\TimeDisplay\timedisplay.js')
+    Assert-True ($timeDisplayText -match 'weather-date-time-content' -and $timeDisplayText -match 'weather-current-date' -and $timeDisplayText -match 'weather-current-time') 'El paquete no contiene la vista compacta de clima, fecha y hora.'
+    $timeDisplayServerText = Get-Content -Raw -LiteralPath (Join-Path $dist 'app\plugins\TimeDisplay\timedisplay_server.js')
+    Assert-True ($timeDisplayServerText -match "endpoints\.post\('/time-display/weather/config'" -and $timeDisplayServerText -match 'isAdminAuthenticated') 'El paquete no protege la configuracion global del clima.'
+    Assert-True ($timeDisplayText -match 'weather-provider' -and $timeDisplayText -match 'weather-company' -and $timeDisplayText -match 'openweathermap') 'El menu no permite seleccionar el proveedor meteorologico.'
     Assert-True (($distConfig.device -eq 'sdr' -and $distConfig.portableRtlMode -eq $true) -or ($distConfig.device -eq 'tef' -and $distConfig.portableRtlMode -eq $false)) 'El modo de audio no coincide con el receptor seleccionado.'
     $serverIndex = Get-Content -Raw -LiteralPath (Join-Path $dist 'app\server\index.js')
     $bridgeText = Get-Content -Raw -LiteralPath (Join-Path $dist 'app\plugins\NRSC5_HDRadio\hd_bridge.py')
@@ -111,6 +155,8 @@ if ($DistributionPath) {
     Assert-True ($dataHandlerText -match 'resetRds: rdsReset') 'El nucleo no expone el reinicio de RDS al resintonizar.'
     Assert-True ($pluginServerText -match 'rtlCapturePath') 'El plugin no conserva el respaldo RTL compartido.'
     Assert-True ($pluginServerText -match 'airspyCapturePath') 'El plugin no usa la captura Airspy HF+ compartida.'
+    Assert-True ($pluginServerText -match 'spectrumAnalyzer\.attach') 'Spectrum Graph no reutiliza el flujo IQ compartido.'
+    Assert-True ($pluginServerText -match "case 'hd-radio-bandwidth'" -and $pluginServerText -match 'rtlCapture\.stdin\.write') 'El dashboard no controla el filtro Airspy en vivo.'
     Assert-True ($pluginServerText -match 'audio_program') 'El servidor no descubre los subcanales HD recibidos.'
     Assert-True ($pluginServerText -match 'Selecting HD.*without retuning') 'Cambiar HD1/HD2/HD3 todavia resintoniza el receptor.'
     Assert-True ($pluginServerText -match 'HD re-enabled on existing receiver capture') 'HD Radio ON todavia reinicia y desconecta el receptor compartido.'
@@ -121,6 +167,8 @@ if ($DistributionPath) {
     Assert-True ($pluginServerText -match 'restartAnalogRds\(rtlCapture\)') 'La resintonia no reinicia Redsea ni limpia el RDS anterior.'
     Assert-True ($streamText -match 'anullsrc=r=48000') 'El modo RTL no contiene la reserva de audio base.'
     Assert-True ($endpointsText -notmatch 'videoDevices: result\.audioDevices|audioDevices: result\.videoDevices') 'La interfaz web intercambia las entradas de audio y video.'
+    Assert-True ($endpointsText -match 'function loadCurrentConfig\(\)' -and $endpointsText -match 'const currentConfig = loadCurrentConfig\(\)') 'El inicio de sesion no recarga las contrasenas guardadas.'
+    Assert-True ($endpointsText -match 'isAdminPassword[\s\S]{0,500}loginAttempts\[ip\]\.count >= MAX_ATTEMPTS') 'Una contrasena correcta aun puede quedar bloqueada por intentos anteriores.'
     Assert-True ($streamText -match "rtbufsize', '64M") 'TEF conserva un bufer DirectShow demasiado pequeno.'
     Assert-True ($streamText -match 'aresample=async=1') 'TEF no corrige deriva ni huecos de la tarjeta de sonido.'
     Assert-True ($streamText -match 'receivedAudio') 'El error de audio no distingue una captura que ya entrega datos.'
@@ -129,6 +177,8 @@ if ($DistributionPath) {
     Assert-True ($bridgeText -match 'librtlsdr\.dll') 'El enumerador Python no reconoce librtlsdr.dll.'
     Assert-True ($serverIndex -match 'rtlVirtualMode') 'El parche del nucleo RTL-SDR no se aplico al servidor.'
     Assert-True ($serverIndex -match 'allowPortableLocalTuning') 'La interfaz local no puede autorizar la sintonizacion RTL.'
+    Assert-True ($serverIndex -match 'tuningAccess\.acquire\(tuningSessionKey\)') 'No se aplica el cupo temporal.'
+    Assert-True ($serverIndex -match 'isAdminAuthenticated\) configSave\(\)') 'El bloqueo administrativo no se guarda.'
     Assert-True ($serverIndex -match 'const ipv4Address = serverConfig\.webserver\.webserverIp;') 'El servidor IPv4 no se enlaza a todas las interfaces para la red local.'
     $passwordScript = Get-Content -Raw -LiteralPath (Join-Path $dist 'scripts\Configure-RemotePasswords.ps1')
     Assert-True ($passwordScript -match 'adminConfirm') 'El configurador no solicita confirmacion de contrasena.'
@@ -153,8 +203,15 @@ if ($DistributionPath) {
     Assert-True ($dataHandlerText -match "dataToSend\.pi = value\.toString\(16\)") 'El decodificador RDS no publica el codigo PI.'
     Assert-True ($pluginFrontendText -match "txt\.textContent = 'FM ANALOG'") 'La interfaz no identifica explicitamente las estaciones analogicas.'
     Assert-True ($pluginFrontendText -match 'HD RADIO OFF') 'Falta el boton visible para forzar FM analogica en HD debil.'
+    Assert-True ($pluginFrontendText -match 'NORMAL 190' -and $pluginFrontendText -match 'DX 160' -and $pluginFrontendText -match 'DX 140') 'Faltan los modos compactos de filtro FM en el dashboard.'
+    Assert-True ($pluginFrontendText -match '!inline\?\.contains\(e\.target\)') 'El icono HD movil cierra el dashboard inmediatamente.'
         & $node --check (Join-Path $dist 'app\plugins\NRSC5_HDRadio\NRSC5_HDRadio_frontend_server.js')
         & $node --check (Join-Path $dist 'app\plugins\NRSC5_HDRadio\analog_rds.js')
+        & $node --check (Join-Path $dist 'app\plugins\NRSC5_HDRadio\spectrum_analyzer.js')
+        & $node --check (Join-Path $dist 'app\plugins\SpectrumGraph\pluginSpectrumGraph_server.js')
+        & $node --check (Join-Path $dist 'app\plugins\TimeDisplayPlugin.js')
+        & $node --check (Join-Path $dist 'app\plugins\TimeDisplay\timedisplay.js')
+        & $node --check (Join-Path $dist 'app\plugins\TimeDisplay\timedisplay_server.js')
     Assert-True ($pluginServerText -match 'retuneLive\(newFreq') 'La sintonia cambia reiniciando el receptor en vez de usar retune en vivo.'
     Assert-True ($pluginServerText -match "stdio: \['pipe', 'pipe', 'pipe', 'pipe'\]") 'El capturador RTL no conserva un canal de control para resintonizar.'
     Assert-True ($pluginServerText -match 'publishRtlMetric') 'Las metricas SNR del RTL no se publican en la interfaz.'
@@ -164,6 +221,7 @@ if ($DistributionPath) {
         & $node --check (Join-Path $dist 'app\server\rtl_virtual_output.js')
         Assert-True ($LASTEXITCODE -eq 0) 'El adaptador virtual RTL-SDR no pasa node --check.'
     Assert-True ($mainUiText -match 'TIMEOUT_DURATION = 15000') 'La interfaz conserva el umbral WebSocket inestable de cinco segundos.'
+    Assert-True ($mainUiText -match 'tuning-access-denied') 'La interfaz no avisa cuando los cupos de sintonia estan ocupados.'
     Assert-True ($mainUiText -notmatch 'messageCounter\+\+') 'La interfaz aun fuerza desconexiones periodicas aunque reciba datos.'
         Push-Location (Join-Path $dist 'app')
     Assert-True ($pluginServerText -match 'HD_SYNC_HOLD_MS = 8000') 'El audio HD no conserva estado ante perdidas breves de sincronizacion.'
@@ -172,6 +230,11 @@ if ($DistributionPath) {
     Assert-True ($pluginFrontendText -match 'b.disabled = !unlocked') 'La interfaz sigue bloqueando HD2/HD3 por metadatos tardios.'
         & $node --check (Join-Path $dist 'app\plugins\NRSC5_HDRadio\NRSC5_HDRadio_frontend_server.js')
         & $node --check (Join-Path $dist 'app\plugins\NRSC5_HDRadio\analog_rds.js')
+        & $node --check (Join-Path $dist 'app\plugins\NRSC5_HDRadio\spectrum_analyzer.js')
+        & $node --check (Join-Path $dist 'app\plugins\SpectrumGraph\pluginSpectrumGraph_server.js')
+        & $node --check (Join-Path $dist 'app\plugins\TimeDisplayPlugin.js')
+        & $node --check (Join-Path $dist 'app\plugins\TimeDisplay\timedisplay.js')
+        & $node --check (Join-Path $dist 'app\plugins\TimeDisplay\timedisplay_server.js')
         Assert-True ($LASTEXITCODE -eq 0) 'El servidor hibrido del plugin no pasa node --check.'
         try { & $node -e "require('express'); require('serialport'); require('ws')" }
         finally { Pop-Location }

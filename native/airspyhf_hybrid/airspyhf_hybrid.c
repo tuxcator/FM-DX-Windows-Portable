@@ -3,7 +3,7 @@
  * stdout: WBFM stereo, PCM s16le 48 kHz.
  * fd 3:   complex float32 I/Q at 744187.5 samples/s for libnrsc5.
  * fd 4:   demodulated FM multiplex, mono PCM s16le 192 kHz for RDS.
- * stdin:  live tune commands: F<frequency_hz>, or Q to stop.
+ * stdin:  live commands: F<frequency_hz>, B<bandwidth_khz>, or Q to stop.
  */
 #include <airspyhf.h>
 #include <fcntl.h>
@@ -22,7 +22,7 @@
 #define PCM_FRAMES 4096u
 #define MPX_FRAMES 4096u
 #define IQ_FRAMES 8192u
-#define ANALOG_HALF_BANDWIDTH_HZ 95000.0
+#define ANALOG_DEFAULT_BANDWIDTH_KHZ 190
 #define NRSC5_NUMERATOR 3969u
 #define NRSC5_DENOMINATOR 4096u
 
@@ -30,6 +30,7 @@ typedef struct {
     airspyhf_device_t *device;
     volatile LONG stop;
     volatile LONG requested_frequency;
+    volatile LONG analog_bandwidth_khz;
     volatile LONG reset_requested;
     uint32_t frequency;
     double prev_i, prev_q;
@@ -130,7 +131,9 @@ static int sample_callback(airspyhf_transfer_t *transfer)
     const double pilot_step = 2.0 * M_PI * 19000.0 / (double)MPX_RATE;
     const double channel_q[4] = { 0.509795579, 0.601344887, 0.899976223, 2.562915448 };
     double channel_b0[4], channel_b1[4], channel_b2[4], channel_a1[4], channel_a2[4];
-    const double channel_w = 2.0 * M_PI * ANALOG_HALF_BANDWIDTH_HZ / (double)INPUT_RATE;
+    const LONG analog_bandwidth_khz = InterlockedCompareExchange(&s->analog_bandwidth_khz, 0, 0);
+    const double analog_half_bandwidth_hz = (double)analog_bandwidth_khz * 500.0;
+    const double channel_w = 2.0 * M_PI * analog_half_bandwidth_hz / (double)INPUT_RATE;
     const double channel_c = cos(channel_w), channel_s = sin(channel_w);
     for (int stage = 0; stage < 4; stage++) {
         const double alpha = channel_s / (2.0 * channel_q[stage]);
@@ -248,15 +251,15 @@ static int sample_callback(airspyhf_transfer_t *transfer)
 
         if (s->metric_samples >= INPUT_RATE) {
             double level = 10.0 * log10(s->metric_signal / (s->metric_samples * 2.0) + 1e-15);
-            double in_band = (2.0 * ANALOG_HALF_BANDWIDTH_HZ) /
-                             ((double)INPUT_RATE - 2.0 * ANALOG_HALF_BANDWIDTH_HZ);
+            double in_band = (2.0 * analog_half_bandwidth_hz) /
+                             ((double)INPUT_RATE - 2.0 * analog_half_bandwidth_hz);
             double noise = s->metric_noise * in_band;
             double carrier = fmax(s->metric_signal - noise, 1e-15);
             double snr = 10.0 * log10(carrier / (noise + 1e-15));
             if (snr < 0.0) snr = 0.0;
             if (snr > 80.0) snr = 80.0;
             s->snr_db = snr;
-            fprintf(stderr, "METRIC level_dbfs=%.1f snr_db=%.1f bandwidth_khz=190 backend=airspyhf\n", level, snr);
+            fprintf(stderr, "METRIC level_dbfs=%.1f snr_db=%.1f bandwidth_khz=%ld backend=airspyhf\n", level, snr, analog_bandwidth_khz);
             if (s->pilot_samples) {
                 double ratio = 10.0 * log10(s->pilot_energy / (s->composite_energy + 1e-15) + 1e-15);
                 int detected = s->stereo_blend > 0.24;
@@ -286,6 +289,13 @@ static DWORD WINAPI control_thread(LPVOID unused)
             unsigned long value = strtoul(line + 1, NULL, 10);
             if (value >= 87500000ul && value <= 108000000ul)
                 InterlockedExchange(&state.requested_frequency, (LONG)value);
+        } else if (line[0] == 'B' || line[0] == 'b') {
+            LONG value = (LONG)strtol(line + 1, NULL, 10);
+            if (value == 140 || value == 160 || value == 190) {
+                InterlockedExchange(&state.analog_bandwidth_khz, value);
+                InterlockedExchange(&state.reset_requested, 1);
+                fprintf(stderr, "BANDWIDTH %ld kHz backend=airspyhf\n", value);
+            }
         } else if (line[0] == 'Q' || line[0] == 'q') {
             InterlockedExchange(&state.stop, 1);
             break;
@@ -310,11 +320,17 @@ static int supports_rate(airspyhf_device_t *device, uint32_t wanted)
 int main(int argc, char **argv)
 {
     if (argc < 4) {
-        fprintf(stderr, "Usage: airspyhf_hybrid frequency_hz serial|auto attenuation_db\n");
+        fprintf(stderr, "Usage: airspyhf_hybrid frequency_hz serial|auto attenuation_db [bandwidth_khz]\n");
         return 2;
     }
     memset(&state, 0, sizeof(state));
     state.mpx_enabled = 1;
+    state.analog_bandwidth_khz = ANALOG_DEFAULT_BANDWIDTH_KHZ;
+    if (argc >= 5) {
+        LONG requested_bandwidth = (LONG)strtol(argv[4], NULL, 10);
+        if (requested_bandwidth == 140 || requested_bandwidth == 160 || requested_bandwidth == 190)
+            state.analog_bandwidth_khz = requested_bandwidth;
+    }
     state.frequency = (uint32_t)strtoul(argv[1], NULL, 10);
     if (state.frequency < 87500000u || state.frequency > 108000000u) return 2;
     const float attenuation = (float)strtod(argv[3], NULL);
@@ -357,8 +373,8 @@ int main(int argc, char **argv)
         airspyhf_close(state.device);
         return 6;
     }
-    fprintf(stderr, "AIRSPYHF_READY serial=%s rate=%u attenuation_db=%.1f freq=%.3f\n",
-            serial ? argv[2] : "auto", INPUT_RATE, attenuation, state.frequency / 1000000.0);
+    fprintf(stderr, "AIRSPYHF_READY serial=%s rate=%u attenuation_db=%.1f bandwidth_khz=%ld freq=%.3f\n",
+            serial ? argv[2] : "auto", INPUT_RATE, attenuation, state.analog_bandwidth_khz, state.frequency / 1000000.0);
 
     while (!InterlockedCompareExchange(&state.stop, 0, 0) && airspyhf_is_streaming(state.device)) {
         LONG pending = InterlockedExchange(&state.requested_frequency, 0);

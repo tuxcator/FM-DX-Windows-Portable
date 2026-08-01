@@ -83,13 +83,13 @@ $save.Add_Click({
         $config = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
         $config.password.adminPass = $admin.Text
         $config.password.tunePass = $tune.Text
-        $config.publicTuner = $false
+        $config.publicTuner = $true
         $json = $config | ConvertTo-Json -Depth 100
         [IO.File]::WriteAllText($configPath, $json, [Text.UTF8Encoding]::new($false))
         $check = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
         if ($check.password.adminPass -ne $admin.Text -or $check.password.tunePass -ne $tune.Text) { throw 'La verificación de escritura no coincide.' }
         $form.Tag = 'saved'
-        [Windows.Forms.MessageBox]::Show("Contraseñas guardadas correctamente.`r`n`r`nReinicie FM-DX antes de iniciar sesión.`r`nEn la web, pulse el icono de llave e introduzca la contraseña correspondiente.", 'FM-DX', 'OK', 'Information') | Out-Null
+        [Windows.Forms.MessageBox]::Show("Contraseñas guardadas correctamente.`r`n`r`nPuede iniciar sesión inmediatamente; no necesita reiniciar FM-DX.`r`nEn la web, pulse el icono de llave e introduzca la contraseña correspondiente.", 'FM-DX', 'OK', 'Information') | Out-Null
         $form.Close()
     } catch {
         $status.Text = "Error al guardar: $($_.Exception.Message)"

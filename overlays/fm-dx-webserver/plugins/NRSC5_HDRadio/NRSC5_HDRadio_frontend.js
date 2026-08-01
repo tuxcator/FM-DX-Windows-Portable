@@ -425,7 +425,9 @@ let audioWs      = null;
 let debugOpen    = false;
 
 let enhancedMeta   = true;   // mirrors server config, controlled by toggle
-let forceHdAudio   = false;  // mirrors server config — global, persisted, all users see same state
+let forceHdAudio   = false;
+let analogBandwidthKhz = 190;
+let receiverType = 'airspyhf';  // mirrors server config — global, persisted, all users see same state
 
 // iTunes album art — fetch when we have title+artist and enhanced meta is on
 let _lastItunesQuery = '';
@@ -1161,6 +1163,8 @@ function applyMeta(v) {
     }
     if (v.enhancedMeta  !== undefined) enhancedMeta  = v.enhancedMeta;
     if (v.forceHdAudio  !== undefined) forceHdAudio  = v.forceHdAudio;
+    if ([140, 160, 190].includes(Number(v.analogBandwidthKhz))) analogBandwidthKhz = Number(v.analogBandwidthKhz);
+    if (v.receiver) receiverType = v.receiver;
 
     // Inject HD signal quality into the global `data` object so signal monitor
     // plugins can display it. Uses `hdBer`/`hdMer` keys to avoid conflicts.
@@ -1828,6 +1832,13 @@ function buildDashboard() {
         #hd-dash .hd-info-label { font-size:9px;letter-spacing:2px;color:#3d4a70;margin-bottom:4px;text-transform:uppercase; }
         #hd-dash .hd-info-value { font-size:13px;color:#99aacc;font-weight:600; }
         #hd-dash input[type=range] { width:100%;accent-color:#3366ee; }
+        #hd-dash .hd-bw-btn {
+            flex:1;min-width:0;background:#0a0e20;color:#667799;border:1px solid #242d50;
+            border-radius:6px;padding:5px 4px;font-size:10px;font-weight:700;letter-spacing:.4px;
+            cursor:pointer;transition:all .15s;white-space:nowrap;
+        }
+        #hd-dash .hd-bw-btn:hover { color:#aac0ff;border-color:#4466aa; }
+        #hd-dash .hd-bw-btn.active { background:#163060;color:#8fd0ff;border-color:#3475cc;box-shadow:0 0 8px rgba(50,120,220,.22); }
         #hd-dash .hd-debug-section {
             background:rgba(0,0,0,.5);border:1px solid #1a2040;
             border-radius:10px;overflow:hidden;
@@ -1968,6 +1979,16 @@ function buildDashboard() {
                 </div>
             </div>
 
+            <!-- Airspy analog bandwidth: compact, live and independent from the HD IQ path -->
+            <div id="hd-bandwidth-row" style="display:flex;align-items:center;gap:8px;background:rgba(5,10,35,.5);border:1px solid #161e40;border-radius:9px;padding:8px 10px;">
+                <div style="font-size:9px;letter-spacing:1.5px;color:#3d4a70;text-transform:uppercase;white-space:nowrap;">FM Filter</div>
+                <div style="display:flex;gap:5px;flex:1;min-width:0;">
+                    <button class="hd-bw-btn tooltip" data-bw="190" data-tooltip="Normal 190 kHz: maximum stereo and RDS fidelity">NORMAL 190</button>
+                    <button class="hd-bw-btn tooltip" data-bw="160" data-tooltip="DX 160 kHz: improved rejection of a strong station 200 kHz away">DX 160</button>
+                    <button class="hd-bw-btn tooltip" data-bw="140" data-tooltip="DX 140 kHz: strongest adjacent-channel rejection; may reduce stereo fidelity">DX 140</button>
+                </div>
+                <span id="hd-bandwidth-status" style="font-size:9px;color:#557799;white-space:nowrap;">ANALOG</span>
+            </div>
             <!-- SDR Gain row -->
             <div style="background:rgba(5,10,35,.5);border:1px solid #161e40;border-radius:9px;padding:10px 14px;">
                 <div style="display:flex;align-items:center;gap:10px;">
@@ -2245,6 +2266,17 @@ function buildDashboard() {
     });
 
     // Gain slider ↔ number input sync
+    // Airspy analog filter modes. The native capture changes coefficients live;
+    // raw IQ for NRSC-5 remains untouched, so HD audio and metadata are unaffected.
+    dash.querySelectorAll('.hd-bw-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const bandwidthKhz = Number(btn.dataset.bw);
+            if (![140, 160, 190].includes(bandwidthKhz)) return;
+            analogBandwidthKhz = bandwidthKhz;
+            send('hd-radio-bandwidth', { bandwidthKhz });
+            refreshDash();
+        });
+    });
     const gainSlider = document.getElementById('hd-gain-slider');
     const gainNum    = document.getElementById('hd-gain-num');
     gainSlider.addEventListener('input', () => { gainNum.value = gainSlider.value; });
@@ -2319,8 +2351,9 @@ function buildDashboard() {
     document.addEventListener('click', e => {
         const d = document.getElementById('hd-dash');
         const b = document.getElementById('hd-radio-btn');
+        const inline = document.getElementById('hd-inline-icon');
         if (!d || d.style.display === 'none') return;
-        if (!d.contains(e.target) && !b?.contains(e.target)) d.style.display = 'none';
+        if (!d.contains(e.target) && !b?.contains(e.target) && !inline?.contains(e.target)) d.style.display = 'none';
     }, false);  // false = bubble, not capture — drag mousedown stopPropagation won't interfere
 }
 
@@ -2363,6 +2396,15 @@ function refreshDash() {
 
     if (tog)  { tog.textContent = hdEnabled ? 'HD RADIO OFF' : 'HD AUTO'; tog.className = hdEnabled ? 'hd-toggle-on' : 'hd-toggle-off'; }
 
+    const bandwidthRow = g('hd-bandwidth-row');
+    if (bandwidthRow) bandwidthRow.style.display = receiverType === 'airspyhf' ? 'flex' : 'none';
+    document.querySelectorAll('#hd-dash .hd-bw-btn').forEach(btn => {
+        const active = Number(btn.dataset.bw) === analogBandwidthKhz;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    const bandwidthStatus = g('hd-bandwidth-status');
+    if (bandwidthStatus) bandwidthStatus.textContent = analogBandwidthKhz === 190 ? 'FIDELITY' : 'ANALOG DX';
     const enhBtn  = g('hd-enhanced-toggle');
     const enhDesc = g('hd-enhanced-desc');
     if (enhBtn) {
