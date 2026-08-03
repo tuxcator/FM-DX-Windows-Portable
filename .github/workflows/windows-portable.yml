@@ -62,7 +62,7 @@ jobs:
       contents: write
     steps:
       - name: Download verified build
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: FM-DX-Windows-Portable
           path: release
